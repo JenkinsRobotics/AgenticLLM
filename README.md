@@ -1,218 +1,176 @@
-## Jenkins Robotics
-# Project Template
+# AgenticLLM
 
-<!-- This is commented out. -->
+A fast local agentic LLM harness on macOS. Two frameworks — **Pygentic** (JSON + GBNF grammar) and **Hermes** (Nous Function-Calling) — run the same Gemma 4 26B-A4B model against the same 11 sandboxed tools, so you can A/B their prompt design, output format, and round-trip pattern head-to-head.
 
-## Project Information
+The goal is to maximize fast local realtime agentic performance and surface where prompt design + output format actually matter for tool-calling latency.
 
-Project Status : <mark style="background-color: green"> &nbsp; COMPLETED &nbsp;</mark>  
-Code Status : <mark style="background-color: green"> &nbsp; GOOD &nbsp;</mark>  
-Development Status : <mark style="background-color: red"> &nbsp; NOT ACTIVE &nbsp;</mark>  
+## What's in the box
 
+| | Pygentic | Hermes |
+|---|---|---|
+| Tool-call format | Bare JSON: `{"tool":"x","args":{...}}` | XML: `<tool_call>{"name":"x","arguments":{...}}</tool_call>` |
+| Tool declarations | Plain-text list in system prompt | JSON Schema in `<tools>` block |
+| Decoding | GBNF grammar-constrained | Unconstrained |
+| Tool result round-trip | Appended user turn: `Tool result: ...` | `<tool_response>{...}</tool_response>` turn |
+| Strength | Hard format guarantee; cheaper cold start | Faster warm decode; cleaner free-text |
 
+Both share the same model, the same tool implementations, the same `LlamaCppPythonClient` plumbing, and the same latency reporting format. The only things that differ are `prompts.py`, `tool_router.py`, and the `decide` / `finalize` call shapes in `main.py`.
 
-&nbsp;
-## General Information
+## Setup
 
+### Requirements
 
- This is a template README file designed to be adapted for your specific project. Replace this text with a brief overview of your project's purpose and goals.
-For example, you might describe the problem your project solves, its primary features, or its target audience. 
-- [x] Automated Tool Change
-- [x] Manual Tool Change
-- [x] Coolent 
-- [x] Tool Z Probe Macro
-- [x] Work Piece XYZ Probe
-- [x] Spindle Control
-- [x] Modularity
+- macOS on Apple Silicon (tested on M-series with Metal)
+- Python 3.10–3.12
+- ~16 GB free RAM for Gemma 4 26B-A4B at Q4_K_M (~15.6 GB resident)
+- Microphone / speaker not needed unless you use the `speak` / `speak_file` tools
 
-&nbsp;
-## WATCH NOW ON YOUTUBE
+### Install
 
-
- Watch the project playlist on youtube. 
-
- &nbsp;
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-&nbsp;
-## Support
-
-Did this project help you? Consider supporting! 
-
-Consider Subscribing: https://bit.ly/2DgZyuq <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
-
-
-
-&nbsp;
-## Table of Contents
-
-
-**[Project File Structure](#project-file-structure)**<br>
-**[Installation Instructions](#installation-instructions)**<br>
-**[Next Steps](#next-steps)**<br>
-**[Components](#components)**<br>
-**[Notes and Miscellaneous](#notes-and-miscellaneous)**<br>
-**[Links](#links)**<br>
-
-
-&nbsp;
-## Project File Structure
-
-The following is a breakdown of the different folders and the files contained in them:
-
-1. **FUSION 360 POST PROCESSOR**
-    - *JenkinsCNCReprap.cps*
-    A post processor is the link between the CAM system and your CNC machine. The Post Processor translated the CAM instruction including information like the toolpath data, the type of operation, and the desired spindle feeds/speeds into the language that a CNC machine understands (gcode). Despite the fact that the DUET 3 runs RepRap Firmware, the standard RepRap post processor do not work for CNC machining. Our Custom post processor is based on the default RepRap post processor but fixes the gcode syntax errors and adds many additional modular features. 
-    **Directions:**
-      - Uploading file to Fusion 360 Cloud Storage [Personal-cloud]
-        With-in Fusion 360 open the project navigation panel. Under Libraries select "Assets", then select folder "CAMPosts" (if no folder exist then create one.) Upload the custom Post Processor within this folder for cloud storage. 
-      - Create NC Program
-        After creating your CAD model select the "Manufacturing Tab" in Fusion 360. Complete the "Setup" process and the desired toolpaths. Create a new "NC Program".  Under "Post Configuration / Library" specify the location of the Post Processor File [personal-cloud recommended]. Under Post specify the desired file "Jenkins CNC RepRap". Adjust Post Properties if desired, then export gcode.  
-
-
-    
-    &nbsp;
-2. **GCODE**  
-   - *SDCARD*
-    This folder contains a copy of all they files located on our Duet 3 Motherboard SD Card. The system drive contains multiple subfolders each containing different gcode / system files. Before Copying/referencing our  custom files it is best to upgrade the stock firmware and system files. The official Duet 3 releases can be found on GitHub.  [RepRap Files](https://github.com/Duet3D "Duet3D").
-      
-   - *Macros*
-    The Macro folder contains all the additional system files needed for the Duet 3. Files are grouped by their function. 
-     **Directions:**
-        - Upload any of the desired files. Then review the files and make any necessary  adjustment to the position points and the probe/sensors numbers.  
-
-   - *Sys*
-    The System folder contains all the important system files needed for the Duet 3. Each file serves as important gcode files that configures the machine and provide necessary gcode for specific processes like tool changes. 
-        **Directions:**
-        - For AutoTool Change Upload the following files:  TFree, Tpost, Tpre, ToolZProbe        
-        - For manual tool Change Upload the following files:  manualtoolchange, ToolZProbe,
-
-
-
-    &nbsp;
-3. **GH Pages**
-    - Files used for Github Pages and readme text file. 
-
-
-  
-
-    &nbsp;
-4. **MANUALS**
-   - *Post Processor Training Guide*
-     - The reference file for fusion 360 post proccessor. Contains reference material for different hadware apart of the CNC. 
-    
-  
-      
-
-
-> Note: Updating the RepRap firmware should be done carefully. Uploading the updated ZIP file could erase custom gcode files. 
-
-
-&nbsp;
-## Installation Instructions
-
-Installation instructions can be found in the youtube video linked below 
- 
-
- ### Video link  be updated soon
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-
-<!-- This is commented out.  
-
-The following is a breakdown of the different folders and the files contained in them:
-
-
-```
-cd utils
-node build.js
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
+The heavy deps (`torch`, `kokoro`, `llama-cpp-python`) take a while to install on a fresh venv. `llama-cpp-python` builds against Metal automatically on Apple Silicon.
 
-Create a file with a `.zip` extension containing these files and directories:
+### Download the model
 
-```
-manifest.json
-common/
-chrome/
-```
-
-
-Create a file with a `.xpi` extension containing these files and directories:
+Both frameworks default to:
 
 ```
-chrome.manifest
-install.rdf
-common/
-firefox/
+~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf
 ```
 
- This is commented out. -->
+The easiest way to get it is [LM Studio](https://lmstudio.ai/) — search for `gemma-4-26B-A4B-it-GGUF`, pick the `Q4_K_M` quant. If you store the file elsewhere, pass `--model-path /your/path.gguf` to either runner.
 
+### Verify install (no model needed)
 
-&nbsp;
-## Next Steps
+The safe-tool self-test runs the parser + every tool against canned inputs without loading the LLM:
 
-This project is now completed. No next steps are planned. We can release bug fixes if found. 
+```bash
+.venv/bin/python main.py pygentic --self-test
+.venv/bin/python main.py hermes   --self-test
+```
 
-If you require assistant join our discord channel linked down below.
+If both print a series of `{"decision": ..., "result": ...}` lines without errors, the install is healthy.
 
+## Running
 
+### Interactive chat
 
-&nbsp;
-## Components 
+```bash
+.venv/bin/python main.py pygentic    # Pygentic chat loop
+.venv/bin/python main.py hermes      # Hermes chat loop
+```
 
-The following is a breakdown of key components for this project:
-&nbsp;
-| Item          | Function      | Cost  |
-| ------------- |:-------------:| -----:|
-| Fusion 360    | CAD           | Free |
-| VS Code       | Text Editor   |   Free |
+You'll see a `You:` prompt. Type anything; `exit`, `quit`, or Ctrl-C to leave. After each reply you'll see a latency report:
 
+```
+Latency:
+- decision: 0.430s  (ttft 0.135s)
+- tool: 0.001s
+- final: 0.481s  (ttft 0.140s)
+- total: 0.912s
+```
 
-&nbsp;
-## Notes and Miscellaneous
+`ttft` = time-to-first-token. `decision` is the routing call; `final` is the optional follow-up rewrite of the tool result into natural language (skipped for `fast`-mode tools).
 
+### One-shot mode
 
-Disclaimer :
-Modifying your Shapeoko  will void the warranty. Do at your own risk.
+```bash
+.venv/bin/python main.py pygentic "what time is it"
+.venv/bin/python main.py hermes "search the web for robot vacuum reviews"
+```
 
-**ENJOY!!**
+Useful for scripting or running a fixed prompt without the interactive loop.
 
-That’s  all Folks. Hope this can help you in some way.
-... Consider Supporting Us Down Below. 
+### Head-to-head benchmark
 
-&nbsp;
-## Links
+```bash
+.venv/bin/python bench.py
+```
 
+Loads each framework once, runs the default 15 prompts through both, prints a side-by-side comparison. Each per-prompt run also appends to `pygentic/logs/latency.jsonl` / `hermes/logs/latency.jsonl` so historical results accumulate.
 
-SUPPORT US ► 
+Custom prompt list (one per line):
 
-Consider Subscribing: https://www.youtube.com/@Jenkins_Robotics<br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics  <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
+```bash
+.venv/bin/python bench.py --prompts my_prompts.txt
+```
 
+Just one framework:
 
-FOLLOW US ►
+```bash
+.venv/bin/python bench.py --only pygentic
+```
 
-Discord ➔ https://discord.gg/sAnE5pRVyT <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Twitter ➔ https://twitter.com/j <br>
-Instagram  ➔ https://www.instagram.com/jenkinsrobotics/ <br>
-Facebook ➔ https://www.facebook.com/jenkinsrobotics/  <br>
-GitHub  ➔ https://jenkinsrobotics.github.io <br>
+Re-summarize existing logs without re-running:
 
+```bash
+.venv/bin/python bench.py --skip-run
+```
 
+Two prompts in the default set play audio out loud (`read bench.txt out loud`, `narrate youtube_intro.txt`). Skip them by passing a smaller prompt list if you don't want TTS during benchmarking.
 
+## Tools
 
+Both frameworks expose the same 11 tools. File ops are confined to each framework's own `workspace/` — even if you ask the model to "save to Desktop," it lands in the workspace and the reply tells you where it actually went.
 
+| Tool | Args | Purpose | Default mode |
+|---|---|---|---|
+| `get_time` | — | Current local date/time | fast |
+| `create_file` | `path`, `content` | Write a text file (overwrites) | natural |
+| `append_file` | `path`, `content` | Append to an existing file | natural |
+| `delete_file` | `path` | Delete a file in the workspace | natural |
+| `read_file` | `path` | Read a text file | fast |
+| `list_directory` | `path` | List a directory | fast |
+| `system_status` | — | CPU / disk / load | fast |
+| `calculate` | `expression` | Safe arithmetic via AST eval (no `eval()`) | fast |
+| `speak` | `text` | Kokoro TTS through default audio output | fast |
+| `speak_file` | `path` | Read a file and speak it (single-call narration) | fast |
+| `web_search` | `query` | DuckDuckGo via `ddgs`, no API key | natural |
 
+`fast` mode returns the raw tool result without a second LLM call. `natural` mode runs `finalize` so the answer is a short natural-language summary. Override either with `--mode fast` / `--mode natural`.
 
+## Project structure
 
+```
+AgenticLLM/
+├── main.py             # Dispatcher: python main.py [pygentic|hermes] [prompt]
+├── bench.py            # Head-to-head benchmark + comparison table
+├── requirements.txt
+├── pygentic/           # JSON + GBNF grammar framework
+│   ├── main.py          # decide / finalize / CLI loop
+│   ├── prompts.py       # Unified system prompt (shared decide+finalize)
+│   ├── tool_router.py   # SAFE_TOOLS, GBNF grammar, parser
+│   ├── tools.py         # Tool implementations (shared shape with hermes/)
+│   ├── llm_client.py    # llama-cpp-python + server clients
+│   ├── logs/            # latency.jsonl (append-only history)
+│   └── workspace/       # Sandboxed file ops
+├── hermes/             # Nous Function-Calling framework (same shape)
+└── docs/               # Project notes (PROJECT.md, SETUP.md, TODO.md)
+```
 
+## Performance notes
 
+A few non-obvious findings from running both frameworks side-by-side on Gemma 4 26B-A4B Q4_K_M:
 
+- **Hermes wins on warm prompts, Pygentic wins on cold start.** Pygentic's lighter system prompt (~25 lines) prefills faster than Hermes's heavier JSON-Schema block (~150 lines) on the very first call. After that, llama.cpp's prefix cache equalizes the prefill cost and Hermes's unconstrained decode pulls ahead.
+- **Use one system prompt across decide+finalize.** If `finalize` uses a different system prompt than `decide`, every finalize call clobbers the KV cache and the *next* decide pays cold prefill (~+0.3s TTFT). Pygentic's `SYSTEM_PROMPT` is intentionally written to cover both turns.
+- **Cache the compiled GBNF grammar.** `LlamaGrammar.from_string()` adds 50-200ms per call if you let it recompile. `LlamaCppPythonClient._compile_grammar` caches by grammar string.
+- **JSON-wrapping free-text answers is expensive.** Forcing every final answer through `{"final":"..."}` triples generation time for jokes/stories/titles vs plain text. Pygentic v2 could close this gap with a hybrid grammar that allows either a constrained tool-call block or unconstrained free text.
+- **TTS audio dominates wall-clock on narration prompts.** `speak_file` on a 4-sentence paragraph takes ~28s regardless of framework — that's the audio playback length, not LLM work.
+
+The latency reports in `latency.jsonl` carry TTFT + total time per stage so you can re-analyze any past run with `bench.py --skip-run` or your own scripts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+Built by [Jenkins Robotics](https://www.youtube.com/@Jenkins_Robotics).
+
+[YouTube](https://www.youtube.com/@Jenkins_Robotics) · [Patreon](https://www.patreon.com/JenkinsRobotics) · [Discord](https://discord.gg/sAnE5pRVyT) · [GitHub](https://jenkinsrobotics.github.io)
