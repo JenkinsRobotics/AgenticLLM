@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import prompts
+from . import prompts, tools
 from .llm_client import DEFAULT_MODEL_PATH, LlamaCppPythonClient, LlamaCppServerClient
 from .tool_router import ToolDecision, parse_decision, run_tool
 from .tools import WORKSPACE, ensure_workspace
@@ -214,107 +214,157 @@ def run_command(client, user_text: str, default_mode: str) -> None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
 
 
+def _decide_with_history(client, base_messages: list[dict[str, str]], extra_messages: list[dict[str, str]]):
+    """Decide() variant that takes already-built messages so we can append
+    prior steps' tool-call/tool-response pairs without rebuilding."""
+    return client.chat(
+        base_messages + extra_messages,
+        max_tokens=2048,
+        temperature=0.0,
+        top_p=0.8,
+        stream=True,
+    )
+
+
 def _run_main(client, user_text: str, default_mode: str) -> None:
+    """Multi-step agent loop. Each step: decide -> tool -> append <tool_response>
+    -> next step. Stops on {"final":"..."}-style answer, max_steps, or
+    same-tool-twice loop detection.
+    """
     total_started = time.perf_counter()
-    try:
-        decision_result = decide(client, user_text)
-    except Exception as exc:
-        total = time.perf_counter() - total_started
-        print(f"LLM request failed: {exc}")
-        print_latency(LatencyReport(0.0, 0.0, 0.0, 0.0, 0.0, total))
-        return
+    max_steps = max(1, int(_pipeline.get("max_steps", 4) or 4))
 
-    try:
-        decision = parse_decision(decision_result.text)
-    except Exception as exc:
-        total = time.perf_counter() - total_started
-        print(f"Decision parse failed: {exc}")
-        print(f"Raw model output: {decision_result.text}")
-        print_latency(
-            LatencyReport(decision_result.latency_s, decision_result.ttft_s, 0.0, 0.0, 0.0, total)
-        )
-        return
+    base_messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
+    if _session_history:
+        base_messages.extend(_session_history)
+    base_messages.append({"role": "user", "content": user_text})
 
-    if decision.final is not None:
-        total = time.perf_counter() - total_started
-        print(decision.final)
-        report = LatencyReport(
-            decision_result.latency_s, decision_result.ttft_s, 0.0, 0.0, 0.0, total
-        )
-        print_latency(report)
-        # If decision.final is populated and the raw output contained a
-        # tool-call-shaped fragment we couldn't recover, the bench should
-        # treat this as a silent format failure rather than a true final
-        # answer. We surface it via parse_fallback="silent_format_fail".
-        raw = decision_result.text or ""
-        looks_like_tool_call = any(t in raw for t in ("tool_call", "call:"))
-        parse_fallback = "silent_format_fail" if looks_like_tool_call else None
-        write_log(
-            {
-                "user": user_text,
-                "decision_raw": decision_result.text,
-                "final": decision.final,
-                "parse_fallback": parse_fallback,
-                "latency": asdict(report),
-            }
-        )
-        return
-
-    tool_started = time.perf_counter()
-    try:
-        tool_result = run_tool(decision)
-    except Exception as exc:
-        tool_result = {"error": str(exc)}
-    tool_latency = time.perf_counter() - tool_started
-
-    mode = default_mode if default_mode != "auto" else decision.mode
+    extra: list[dict[str, str]] = []
+    steps: list[dict[str, Any]] = []
+    decision_total = 0.0
+    decision_first_ttft = 0.0
+    tool_total = 0.0
+    first_decision_raw = ""
+    first_decision_dict: dict[str, Any] | None = None
+    first_parse_fallback: str | None = None
+    final_answer: str | None = None
     final_latency = 0.0
     final_ttft = 0.0
-    if mode == "fast":
-        answer = format_tool_result(tool_result)
-    else:
+    loop_seen: set[tuple[str, str]] = set()
+
+    for step_idx in range(max_steps):
         try:
-            final_result = finalize(client, user_text, decision_result.text, decision, tool_result)
+            decision_result = _decide_with_history(client, base_messages, extra)
         except Exception as exc:
             total = time.perf_counter() - total_started
-            print(f"Final LLM request failed: {exc}")
-            print("Tool result:")
-            print(format_tool_result(tool_result))
-            print_latency(
-                LatencyReport(
-                    decision_result.latency_s,
-                    decision_result.ttft_s,
-                    tool_latency,
-                    0.0,
-                    0.0,
-                    total,
-                )
-            )
+            print(f"LLM request failed: {exc}")
+            print_latency(LatencyReport(0.0, 0.0, 0.0, 0.0, 0.0, total))
             return
-        answer = final_result.text
-        final_latency = final_result.latency_s
-        final_ttft = final_result.ttft_s
+
+        decision_total += decision_result.latency_s
+        if step_idx == 0:
+            decision_first_ttft = decision_result.ttft_s
+            first_decision_raw = decision_result.text
+
+        try:
+            decision = parse_decision(decision_result.text)
+        except Exception as exc:
+            total = time.perf_counter() - total_started
+            print(f"Decision parse failed at step {step_idx+1}: {exc}")
+            print(f"Raw model output: {decision_result.text}")
+            print_latency(LatencyReport(decision_total, decision_first_ttft, tool_total, 0.0, 0.0, total))
+            return
+
+        if step_idx == 0:
+            first_decision_dict = asdict(decision)
+            first_parse_fallback = decision.parse_fallback
+
+        if decision.final is not None:
+            final_answer = decision.final
+            break
+
+        key = (decision.tool or "", json.dumps(decision.args, sort_keys=True, ensure_ascii=True))
+        if key in loop_seen:
+            final_answer = "(stopped: model repeated the same tool call — likely loop)"
+            break
+        loop_seen.add(key)
+
+        tool_started = time.perf_counter()
+        try:
+            tool_result = run_tool(decision)
+        except Exception as exc:
+            tool_result = {"error": str(exc)}
+        tool_latency = time.perf_counter() - tool_started
+        tool_total += tool_latency
+
+        steps.append({
+            "step": step_idx + 1,
+            "decision": asdict(decision),
+            "tool_result": tool_result,
+            "tool_latency": tool_latency,
+        })
+
+        # Append in Hermes format so the next iteration sees the call+response.
+        tool_response = json.dumps({"name": decision.tool, "content": tool_result}, ensure_ascii=True)
+        extra.append({"role": "assistant", "content": decision_result.text})
+        extra.append({
+            "role": "user",
+            "content": f"<tool_response>\n{tool_response}\n</tool_response>",
+        })
+
+    if final_answer is None:
+        if steps:
+            last = steps[-1]
+            mode_to_use = default_mode if default_mode != "auto" else last["decision"].get("mode", "natural")
+            if mode_to_use == "fast":
+                final_answer = format_tool_result(last["tool_result"])
+            else:
+                try:
+                    decision_obj = ToolDecision(
+                        tool=last["decision"]["tool"],
+                        args=last["decision"]["args"],
+                        mode=last["decision"]["mode"],
+                        final=last["decision"]["final"],
+                        parse_fallback=last["decision"].get("parse_fallback"),
+                    )
+                    final_result = finalize(client, user_text, "", decision_obj, last["tool_result"])
+                    final_answer = final_result.text
+                    final_latency = final_result.latency_s
+                    final_ttft = final_result.ttft_s
+                except Exception:
+                    final_answer = format_tool_result(last["tool_result"])
+        else:
+            # No tool steps and no final — fall back to printing the raw output.
+            final_answer = first_decision_raw.strip() or "(no decision produced)"
+
+    # Surface silent format failures as before (only meaningful when zero steps ran).
+    if not steps and first_decision_raw and any(t in first_decision_raw for t in ("tool_call", "call:")):
+        first_parse_fallback = first_parse_fallback or "silent_format_fail"
 
     total = time.perf_counter() - total_started
     report = LatencyReport(
-        decision=decision_result.latency_s,
-        decision_ttft=decision_result.ttft_s,
-        tool=tool_latency,
+        decision=decision_total,
+        decision_ttft=decision_first_ttft,
+        tool=tool_total,
         final=final_latency,
         final_ttft=final_ttft,
         total=total,
     )
-    print(answer)
+    print(final_answer)
     print_latency(report)
+    if len(steps) > 1:
+        print(f"  (chained {len(steps)} tool calls)")
+
     write_log(
         {
             "user": user_text,
-            "decision_raw": decision_result.text,
-            "decision": asdict(decision),
-            "parse_fallback": decision.parse_fallback,
-            "tool_result": tool_result,
-            "answer": answer,
-            "mode": mode,
+            "decision_raw": first_decision_raw,
+            "decision": first_decision_dict,
+            "parse_fallback": first_parse_fallback,
+            "steps": steps,
+            "steps_taken": len(steps),
+            "answer": final_answer,
+            "mode": default_mode,
             "latency": asdict(report),
         }
     )
@@ -395,6 +445,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Opt-in: inject identity.md, maintain session history, and append every turn to memory/episodic.jsonl.",
     )
+    parser.add_argument(
+        "--no-warm-tts",
+        action="store_true",
+        help="Skip Kokoro TTS warmup at startup. First speak/speak_file call will pay ~3-5s setup cost.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=4,
+        help="Max chained tool calls per user turn (multi-step agent loop). 1 = single-step legacy behavior.",
+    )
     return parser.parse_args()
 
 
@@ -402,6 +463,8 @@ def init_from_env(client) -> None:
     """Initialize extensions from BENCH_WITH_* env vars only.
 
     Used by bench.py, which imports run_command directly and bypasses argparse.
+    Also warms Kokoro and sets a default max_steps so the bench gets the same
+    pipeline as the interactive CLI by default.
     """
     class _A:
         with_mcp = False
@@ -409,6 +472,12 @@ def init_from_env(client) -> None:
         with_memory = False
 
     init_extensions(_A(), client)
+    _pipeline.setdefault("max_steps", 4)
+
+    if os.environ.get("BENCH_NO_WARM_TTS") != "1":
+        result = tools.warm_kokoro()
+        if result.get("warmed"):
+            print(f"[hermes] Kokoro warmed in {result.get('seconds')}s.", flush=True)
 
 
 def shutdown_extensions(wait: bool = True) -> None:
@@ -507,6 +576,15 @@ def main() -> int:
             return 2
 
     init_extensions(args, client)
+
+    if not args.no_warm_tts:
+        result = tools.warm_kokoro()
+        if result.get("warmed"):
+            print(f"[hermes] Kokoro warmed in {result.get('seconds')}s.", flush=True)
+        else:
+            print(f"[hermes] Kokoro warmup skipped: {result.get('reason')}", file=sys.stderr, flush=True)
+
+    _pipeline["max_steps"] = max(1, int(getattr(args, "max_steps", 4) or 4))
 
     prompt = " ".join(args.prompt).strip()
     try:

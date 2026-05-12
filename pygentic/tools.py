@@ -152,8 +152,25 @@ def _ensure_kokoro() -> Any:
     if _kokoro_pipeline is None:
         from kokoro import KPipeline
 
-        _kokoro_pipeline = KPipeline(lang_code=KOKORO_LANG)
+        # Pass repo_id explicitly to suppress the "Defaulting repo_id..."
+        # warning Kokoro emits on every fresh pipeline construction.
+        _kokoro_pipeline = KPipeline(lang_code=KOKORO_LANG, repo_id="hexgrad/Kokoro-82M")
     return _kokoro_pipeline
+
+
+def warm_kokoro() -> dict[str, Any]:
+    """Pre-load Kokoro at process startup so the first user-facing speak()
+    or speak_file() call doesn't pay the ~3-5 s weight-load tax."""
+    started = time.perf_counter()
+    try:
+        pipe = _ensure_kokoro()
+        # Iterate once to trigger any remaining lazy initialization inside
+        # the pipeline. We don't actually play the audio.
+        for _ in pipe(" ", voice=KOKORO_VOICE):
+            break
+    except Exception as exc:
+        return {"warmed": False, "reason": str(exc)}
+    return {"warmed": True, "seconds": round(time.perf_counter() - started, 3)}
 
 
 # Minimal SSML-style markup supported by speak()/speak_file():
