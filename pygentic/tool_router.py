@@ -1,4 +1,8 @@
-"""Tool parsing and routing for the headless agent test."""
+"""Pygentic tool parsing and routing.
+
+Pygentic style: the model emits minimal JSON. A GBNF grammar restricts the
+output to either a tool call or a {"final": "..."} answer. No prose, no XML.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +25,8 @@ SAFE_TOOLS: dict[str, ToolFunc] = {
     "system_status": tools.system_status,
     "calculate": tools.calculate,
     "speak": tools.speak,
+    "speak_file": tools.speak_file,
+    "web_search": tools.web_search,
 }
 
 # Per-tool default response mode in --mode auto. Tools whose raw output already
@@ -35,6 +41,8 @@ TOOL_DEFAULT_MODE: dict[str, str] = {
     "system_status": "fast",
     "calculate": "fast",
     "speak": "fast",
+    "speak_file": "fast",
+    "web_search": "natural",
 }
 
 # GBNF grammar that constrains the decision step to either a tool call or a
@@ -44,7 +52,7 @@ DECISION_GRAMMAR = r'''
 root        ::= tool-call | final-answer
 tool-call   ::= "{\"tool\":" tool-name ",\"args\":" args "}"
 final-answer ::= "{\"final\":" string "}"
-tool-name   ::= "\"get_time\"" | "\"create_file\"" | "\"append_file\"" | "\"delete_file\"" | "\"read_file\"" | "\"list_directory\"" | "\"system_status\"" | "\"calculate\"" | "\"speak\""
+tool-name   ::= "\"get_time\"" | "\"create_file\"" | "\"append_file\"" | "\"delete_file\"" | "\"read_file\"" | "\"list_directory\"" | "\"system_status\"" | "\"calculate\"" | "\"speak\"" | "\"speak_file\"" | "\"web_search\""
 args        ::= "{" (kv ("," kv)*)? "}"
 kv          ::= string ":" string
 string      ::= "\"" char* "\""

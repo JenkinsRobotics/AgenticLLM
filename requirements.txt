@@ -4,6 +4,10 @@ llama-cpp-python>=0.2.90
 requests>=2.34.0
 certifi>=2026.4.22
 
+# web_search tool — DuckDuckGo, no API key needed. The package was renamed
+# from `duckduckgo-search` to `ddgs`; the tool tries both at import time.
+ddgs>=9.0
+
 # speak() tool — Kokoro TTS + audio playback.
 # Heavy deps (torch, scipy); only loaded when the speak tool is invoked.
 kokoro>=0.9.4

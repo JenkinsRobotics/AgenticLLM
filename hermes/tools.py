@@ -170,6 +170,48 @@ def speak(text: str) -> dict[str, Any]:
     }
 
 
+def speak_file(path: str) -> dict[str, Any]:
+    """Read a workspace file and speak its contents through Kokoro."""
+    target = workspace_path(path)
+    if not target.exists() or not target.is_file():
+        return {"spoken": False, "reason": "file not found", "path": path}
+    text = target.read_text(encoding="utf-8")
+    result = speak(text)
+    result["from_file"] = str(target.relative_to(WORKSPACE))
+    return result
+
+
+def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
+    """DuckDuckGo HTML search. No API key required."""
+    try:
+        from ddgs import DDGS  # newer package name
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            return {"error": "duckduckgo-search not installed", "query": query}
+
+    cleaned = query.strip()
+    if not cleaned:
+        return {"error": "empty query"}
+
+    try:
+        with DDGS() as ddgs:
+            raw = list(ddgs.text(cleaned, max_results=max_results))
+    except Exception as exc:
+        return {"error": str(exc), "query": cleaned}
+
+    results = [
+        {
+            "title": item.get("title"),
+            "url": item.get("href") or item.get("url"),
+            "snippet": item.get("body") or item.get("snippet"),
+        }
+        for item in raw
+    ]
+    return {"query": cleaned, "results": results}
+
+
 def system_status() -> dict[str, Any]:
     total, used, free = shutil.disk_usage(WORKSPACE)
     load_avg = os.getloadavg() if hasattr(os, "getloadavg") else None

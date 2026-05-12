@@ -60,6 +60,7 @@ class LlamaCppPythonClient:
         print(f"[llama.cpp] Loading {path.name}...", flush=True)
         started = time.perf_counter()
         self.llm = Llama(**kwargs)
+        self._grammar_cache: dict[str, Any] = {}
         print(f"[llama.cpp] Loaded in {time.perf_counter() - started:.1f}s.", flush=True)
 
         if warmup:
@@ -90,12 +91,9 @@ class LlamaCppPythonClient:
             "stream": stream,
         }
         if grammar:
-            try:
-                from llama_cpp import LlamaGrammar
-
-                kwargs["grammar"] = LlamaGrammar.from_string(grammar, verbose=False)
-            except Exception as exc:
-                print(f"[grammar] disabled: {exc}", file=sys.stderr)
+            compiled = self._compile_grammar(grammar)
+            if compiled is not None:
+                kwargs["grammar"] = compiled
 
         started = time.perf_counter()
         completion = self.llm.create_chat_completion(**kwargs)
@@ -106,6 +104,21 @@ class LlamaCppPythonClient:
             ttft = time.perf_counter() - started
         elapsed = time.perf_counter() - started
         return LLMResult(text=text.strip(), latency_s=elapsed, ttft_s=ttft)
+
+    def _compile_grammar(self, grammar: str) -> Any:
+        cached = self._grammar_cache.get(grammar)
+        if cached is not None:
+            return cached
+        try:
+            from llama_cpp import LlamaGrammar
+
+            compiled = LlamaGrammar.from_string(grammar, verbose=False)
+        except Exception as exc:
+            print(f"[grammar] disabled: {exc}", file=sys.stderr)
+            self._grammar_cache[grammar] = None
+            return None
+        self._grammar_cache[grammar] = compiled
+        return compiled
 
     @staticmethod
     def _collect_stream(chunks, started: float) -> tuple[str, float]:
