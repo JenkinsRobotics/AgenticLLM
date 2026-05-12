@@ -89,28 +89,16 @@ Useful for scripting or running a fixed prompt without the interactive loop.
 ### Head-to-head benchmark
 
 ```bash
-.venv/bin/python bench.py
+.venv/bin/python bench.py                       # default mode
+.venv/bin/python bench.py --with-mcp            # adds opt-in MCP prompts
+.venv/bin/python bench.py --think               # adds background thinking
+.venv/bin/python bench.py --only pygentic       # one framework only
+.venv/bin/python bench.py --prompts file.txt    # custom prompt list
+.venv/bin/python bench.py --skip-run            # re-summarize existing logs
+.venv/bin/python bench.py --history             # trend view across runs
 ```
 
-Loads each framework once, runs the default 15 prompts through both, prints a side-by-side comparison. Each per-prompt run also appends to `pygentic/logs/latency.jsonl` / `hermes/logs/latency.jsonl` so historical results accumulate.
-
-Custom prompt list (one per line):
-
-```bash
-.venv/bin/python bench.py --prompts my_prompts.txt
-```
-
-Just one framework:
-
-```bash
-.venv/bin/python bench.py --only pygentic
-```
-
-Re-summarize existing logs without re-running:
-
-```bash
-.venv/bin/python bench.py --skip-run
-```
+Each run gets a `mode_tag` (`default` / `mcp` / `think` / `mcp+think`) in `bench_history.jsonl` so trends compare cleanly. Two default prompts play audio (`read bench.txt`, `narrate youtube_intro.txt`); pass a smaller prompt list to skip TTS.
 
 Two prompts in the default set play audio out loud (`read bench.txt out loud`, `narrate youtube_intro.txt`). Skip them by passing a smaller prompt list if you don't want TTS during benchmarking.
 
@@ -163,7 +151,15 @@ A few non-obvious findings from running both frameworks side-by-side on Gemma 4 
 - **JSON-wrapping free-text answers is expensive.** Forcing every final answer through `{"final":"..."}` triples generation time for jokes/stories/titles vs plain text. Pygentic v2 could close this gap with a hybrid grammar that allows either a constrained tool-call block or unconstrained free text.
 - **TTS audio dominates wall-clock on narration prompts.** `speak_file` on a 4-sentence paragraph takes ~28s regardless of framework — that's the audio playback length, not LLM work.
 
-The latency reports in `latency.jsonl` carry TTFT + total time per stage so you can re-analyze any past run with `bench.py --skip-run` or your own scripts.
+The latency reports in `latency.jsonl` carry TTFT + total time per stage so you can re-analyze any past run with `bench.py --skip-run` or your own scripts. Each bench run also appends an aggregate to `bench_history.jsonl` at the project root — see [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for how to read trends with `python bench.py --history`.
+
+## Docs
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, request pipeline, framework differences
+- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — running benchmarks, reading history, regression detection
+- [docs/PROJECT.md](docs/PROJECT.md) — high-level project overview
+- [docs/SETUP.md](docs/SETUP.md) — install and verification
+- [docs/TODO.md](docs/TODO.md) — open work
 
 ## License
 

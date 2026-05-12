@@ -86,7 +86,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "speak",
-        "description": "Speak text aloud through the speakers via Kokoro TTS.",
+        "description": "Speak text aloud via Kokoro TTS. Supports minimal SSML: <break time=\"200ms\"/> for pauses and <breath/> for soft inhales — use these to pace YouTube-style narration naturally.",
         "parameters": {
             "type": "object",
             "properties": {"text": {"type": "string"}},
@@ -95,7 +95,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "speak_file",
-        "description": "Read a workspace file and narrate its contents aloud via Kokoro TTS.",
+        "description": "Read a workspace file and narrate its contents aloud via Kokoro TTS. SSML tags in the file are honored.",
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string"}},
@@ -117,8 +117,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-def system_prompt() -> str:
-    schemas_block = json.dumps(TOOL_SCHEMAS, indent=2)
+def system_prompt(extra_schemas: list[dict[str, Any]] | None = None) -> str:
+    schemas = list(TOOL_SCHEMAS)
+    if extra_schemas:
+        schemas.extend(extra_schemas)
+    schemas_block = json.dumps(schemas, indent=2)
     return f"""You are Lilith, a function-calling AI assistant.
 
 You have access to the following tools. Function signatures are declared as JSON Schema inside <tools></tools> tags:

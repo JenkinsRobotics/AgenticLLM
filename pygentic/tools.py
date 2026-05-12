@@ -7,6 +7,7 @@ import datetime as dt
 import operator as op
 import os
 import platform
+import re
 import shutil
 import time
 from pathlib import Path
@@ -142,8 +143,47 @@ def _ensure_kokoro() -> Any:
     return _kokoro_pipeline
 
 
+# Minimal SSML-style markup supported by speak()/speak_file():
+#   <speak>...</speak>            wrapper, stripped
+#   <break time="200ms"/>          insert silence (ms or s units)
+#   <breath/>                      short silent gap, mimics a breath
+# Anything else falls through as plain text to Kokoro.
+_SSML_SPEAK_TAG = re.compile(r"</?speak\s*>", re.IGNORECASE)
+_SSML_TAG = re.compile(
+    r'<break\s+time=["\'](\d+(?:\.\d+)?)\s*(ms|s)["\']\s*/?>|<breath\s*/?>',
+    re.IGNORECASE,
+)
+_BREATH_GAP_MS = 220  # silent stand-in for a soft inhale
+
+
+def _ssml_segments(text: str):
+    """Yield ('text', str) | ('silence_ms', int) chunks. Pure parsing; no audio."""
+    cleaned = _SSML_SPEAK_TAG.sub("", text)
+    pos = 0
+    for match in _SSML_TAG.finditer(cleaned):
+        before = cleaned[pos:match.start()]
+        if before.strip():
+            yield ("text", before.strip())
+        tag = match.group(0).lower()
+        if tag.startswith("<break"):
+            value = float(match.group(1))
+            unit = match.group(2).lower()
+            ms = int(value * 1000) if unit == "s" else int(value)
+            yield ("silence_ms", ms)
+        else:  # <breath/>
+            yield ("silence_ms", _BREATH_GAP_MS)
+        pos = match.end()
+    tail = cleaned[pos:]
+    if tail.strip():
+        yield ("text", tail.strip())
+
+
 def speak(text: str) -> dict[str, Any]:
-    """Synthesize speech with Kokoro and play it through the default output."""
+    """Synthesize speech with Kokoro and play it through the default output.
+
+    Supports minimal SSML: <speak>, <break time="Xms"/>, <breath/>. Plain text
+    without tags takes the original fast path (single Kokoro call).
+    """
     import numpy as np
     import sounddevice as sd
 
@@ -154,9 +194,23 @@ def speak(text: str) -> dict[str, Any]:
     pipe = _ensure_kokoro()
     started = time.perf_counter()
     chunks: list[Any] = []
-    for r in pipe(cleaned, voice=KOKORO_VOICE):
-        if r.audio is not None:
-            chunks.append(np.asarray(r.audio, dtype=np.float32))
+    has_ssml = ("<break" in cleaned.lower()) or ("<breath" in cleaned.lower()) or ("<speak" in cleaned.lower())
+
+    if has_ssml:
+        for kind, value in _ssml_segments(cleaned):
+            if kind == "text":
+                for r in pipe(value, voice=KOKORO_VOICE):
+                    if r.audio is not None:
+                        chunks.append(np.asarray(r.audio, dtype=np.float32))
+            else:  # silence_ms
+                n = int(KOKORO_SAMPLE_RATE * value / 1000)
+                if n > 0:
+                    chunks.append(np.zeros(n, dtype=np.float32))
+    else:
+        for r in pipe(cleaned, voice=KOKORO_VOICE):
+            if r.audio is not None:
+                chunks.append(np.asarray(r.audio, dtype=np.float32))
+
     if not chunks:
         return {"spoken": False, "reason": "no audio generated"}
 
@@ -167,6 +221,7 @@ def speak(text: str) -> dict[str, Any]:
         "spoken": True,
         "chars": len(cleaned),
         "seconds": round(time.perf_counter() - started, 3),
+        "ssml": has_ssml,
     }
 
 

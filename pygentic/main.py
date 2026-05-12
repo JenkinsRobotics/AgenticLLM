@@ -5,18 +5,34 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import prompts
+from . import prompts, tool_router
 from .llm_client import DEFAULT_MODEL_PATH, LlamaCppPythonClient, LlamaCppServerClient
-from .tool_router import DECISION_GRAMMAR, ToolDecision, parse_decision, run_tool
+from .tool_router import ToolDecision, parse_decision, run_tool
 from .tools import WORKSPACE, ensure_workspace
 
 
 LOG_DIR = Path(__file__).resolve().parent / "logs"
+
+
+# Pipeline state — mutated only at init time. decide/finalize read these; the
+# default values keep the fast path identical to pre-extension behavior.
+_pipeline: dict[str, Any] = {
+    "system_prompt": prompts.SYSTEM_PROMPT,
+    "grammar": tool_router.DECISION_GRAMMAR,
+    "llm_lock": None,            # threading.Lock() when --think is on
+    "thinking_runner": None,     # ThinkingRunner when --think is on
+    "with_mcp": False,
+    "with_thinking": False,
+}
 
 
 @dataclass
@@ -52,7 +68,12 @@ def print_latency(report: LatencyReport) -> None:
 def write_log(entry: dict[str, Any]) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "latency.jsonl"
-    entry = {"framework": "pygentic", **entry}
+    entry = {
+        "framework": "pygentic",
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_id": os.environ.get("BENCH_RUN_ID"),
+        **entry,
+    }
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
@@ -63,21 +84,21 @@ def decide(client, user_text: str):
     # content). Short routing decisions still finish in ~30-50 tokens.
     return client.chat(
         [
-            {"role": "system", "content": prompts.DECISION_SYSTEM_PROMPT},
+            {"role": "system", "content": _pipeline["system_prompt"]},
             {"role": "user", "content": user_text},
         ],
         max_tokens=2048,
         temperature=0.0,
         top_p=0.8,
         stream=True,
-        grammar=DECISION_GRAMMAR,
+        grammar=_pipeline["grammar"],
     )
 
 
 def finalize(client, user_text: str, decision: ToolDecision, tool_result: dict[str, Any]):
     return client.chat(
         [
-            {"role": "system", "content": prompts.FINAL_SYSTEM_PROMPT},
+            {"role": "system", "content": _pipeline["system_prompt"]},
             {"role": "user", "content": user_text},
             {
                 "role": "assistant",
@@ -92,7 +113,8 @@ def finalize(client, user_text: str, decision: ToolDecision, tool_result: dict[s
     )
 
 
-def run_command(client, user_text: str, default_mode: str) -> None:
+def _run_main(client, user_text: str, default_mode: str) -> None:
+    """Inner run_command without lock + thinking glue. See run_command below."""
     total_started = time.perf_counter()
     try:
         decision_result = decide(client, user_text)
@@ -189,6 +211,21 @@ def run_command(client, user_text: str, default_mode: str) -> None:
     )
 
 
+def run_command(client, user_text: str, default_mode: str) -> None:
+    """Run one turn. When thinking is enabled, serializes against the LLM lock
+    and queues a background thinking job after the main response."""
+    lock = _pipeline["llm_lock"]
+    if lock is not None:
+        with lock:
+            _run_main(client, user_text, default_mode)
+    else:
+        _run_main(client, user_text, default_mode)
+
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+
 def cli_loop(client, mode: str) -> int:
     ensure_workspace()
     print(f"[pygentic] Workspace: {WORKSPACE}")
@@ -249,7 +286,71 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--no-health-check", action="store_true", help="Skip server health check.")
     parser.add_argument("--self-test", action="store_true", help="Test safe tools without the LLM server.")
+    parser.add_argument(
+        "--with-mcp",
+        action="store_true",
+        help="Opt-in: connect to MCP servers from mcp_config.json and expose their tools as mcp:server/tool.",
+    )
+    parser.add_argument(
+        "--think",
+        action="store_true",
+        help="Opt-in: run a background thinking call after each turn; logs to thinking.jsonl.",
+    )
     return parser.parse_args()
+
+
+def init_from_env(client) -> None:
+    """Initialize extensions from BENCH_WITH_* env vars only.
+
+    Used by bench.py, which imports run_command directly and bypasses argparse.
+    """
+    class _A:
+        with_mcp = False
+        think = False
+
+    init_extensions(_A(), client)
+
+
+def shutdown_extensions(wait: bool = True) -> None:
+    """Drain background thinking jobs. Called by bench.py at end of run."""
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        runner.shutdown(wait=wait)
+
+
+def init_extensions(args, client) -> None:
+    """Mutate _pipeline once based on CLI flags + env vars. Default values
+    keep the fast path identical when neither extension is enabled."""
+    with_mcp = args.with_mcp or os.environ.get("BENCH_WITH_MCP") == "1"
+    with_thinking = args.think or os.environ.get("BENCH_WITH_THINKING") == "1"
+    _pipeline["with_mcp"] = with_mcp
+    _pipeline["with_thinking"] = with_thinking
+
+    if with_mcp:
+        try:
+            import mcp_bridge
+
+            registry = mcp_bridge.init_from_config()
+            specs = registry.list_tools()
+            if specs:
+                extra = [(s.qualified_name, s.description) for s in specs]
+                _pipeline["system_prompt"] = prompts.with_mcp_tools(extra)
+                names = list(tool_router.SAFE_TOOLS.keys()) + [s.qualified_name for s in specs]
+                _pipeline["grammar"] = tool_router.build_decision_grammar(names)
+                print(f"[pygentic] MCP enabled with {len(specs)} extended tool(s).", flush=True)
+        except Exception as exc:
+            print(f"[pygentic] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
+
+    if with_thinking:
+        try:
+            import thinking_runner
+
+            lock = threading.Lock()
+            _pipeline["llm_lock"] = lock
+            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(client, "pygentic", lock)
+            print("[pygentic] background thinking enabled — see thinking.jsonl.", flush=True)
+        except Exception as exc:
+            print(f"[pygentic] --think failed: {exc}", file=sys.stderr, flush=True)
 
 
 def main() -> int:
@@ -280,12 +381,23 @@ def main() -> int:
             print(f"Failed to load local llama.cpp model: {exc}")
             return 2
 
+    init_extensions(args, client)
+
     prompt = " ".join(args.prompt).strip()
-    if prompt:
-        ensure_workspace()
-        run_command(client, prompt, args.mode)
-        return 0
-    return cli_loop(client, args.mode)
+    try:
+        if prompt:
+            ensure_workspace()
+            run_command(client, prompt, args.mode)
+            return 0
+        return cli_loop(client, args.mode)
+    finally:
+        # If thinking jobs are still queued at shutdown, wait briefly so the
+        # log gets the entry. Don't block forever.
+        runner = _pipeline["thinking_runner"]
+        if runner is not None:
+            if runner.pending() > 0:
+                print("[pygentic] waiting for background thinking jobs...", flush=True)
+            runner.shutdown(wait=True)
 
 
 if __name__ == "__main__":

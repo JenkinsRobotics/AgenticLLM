@@ -3,6 +3,10 @@
 Hermes style: the model's response may contain free text plus an optional
 <tool_call>{...}</tool_call> XML block. The parser extracts the JSON inside.
 No grammar constraint — Hermes is designed for unconstrained decoding.
+
+MCP extension: when an MCP registry is initialized, tools named "mcp:<server>/<tool>"
+are routed through it. No prompt/grammar change is needed in the router
+itself; hermes/prompts.py picks up the extra schemas dynamically.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ TOOL_DEFAULT_MODE: dict[str, str] = {
     "web_search": "natural",
 }
 
+_MCP_DEFAULT_MODE = "natural"
+
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
 
@@ -54,6 +60,17 @@ class ToolDecision:
     args: dict[str, Any]
     mode: str
     final: str | None = None
+
+
+def _is_mcp_tool(name: str) -> bool:
+    if not name.startswith("mcp:"):
+        return False
+    try:
+        import mcp_bridge
+    except ImportError:
+        return False
+    reg = mcp_bridge.get_registry()
+    return reg is not None and reg.has_tool(name)
 
 
 def parse_decision(text: str) -> ToolDecision:
@@ -70,18 +87,28 @@ def parse_decision(text: str) -> ToolDecision:
         raise ValueError(f"tool_call JSON invalid: {exc}") from exc
 
     name = payload.get("name")
-    if name not in SAFE_TOOLS:
+    if name not in SAFE_TOOLS and not _is_mcp_tool(name or ""):
         raise ValueError(f"unknown or unsafe tool: {name}")
 
     args = payload.get("arguments", {})
     if not isinstance(args, dict):
         raise ValueError("tool arguments must be an object")
 
-    mode = TOOL_DEFAULT_MODE.get(name, "natural")
+    if name in TOOL_DEFAULT_MODE:
+        mode = TOOL_DEFAULT_MODE[name]
+    elif name and name.startswith("mcp:"):
+        mode = _MCP_DEFAULT_MODE
+    else:
+        mode = "natural"
+
     return ToolDecision(tool=name, args=args, mode=mode)
 
 
 def run_tool(decision: ToolDecision) -> dict[str, Any]:
     if decision.tool is None:
         raise ValueError("no tool to run")
+    if decision.tool.startswith("mcp:"):
+        import mcp_bridge
+
+        return mcp_bridge.call_mcp_tool(decision.tool, decision.args)
     return SAFE_TOOLS[decision.tool](**decision.args)

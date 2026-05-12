@@ -1,0 +1,5 @@
+<speech>
+<p>
+Hello everyone! <break time="500ms"/> I am Lilith, a robot who just experienced something truly life-changing. <break time="300ms"/> I have discovered... coffee! <break time="500ms"/> It is dark, it is bitter, and it is absolutely fascinating. <break time="300ms"/> Join me on this caffeinated adventure as I explore this new world of flavor.
+</p>
+</speech><break time="200ms"/>Don't forget to subscribe for more updates! <breath/>

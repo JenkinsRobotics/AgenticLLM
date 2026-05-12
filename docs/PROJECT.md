@@ -1,53 +1,55 @@
 # AgenticLLM Project Notes
 
-## Current Goal
+High-level overview. For deep technical detail see:
 
-Build a fast local agentic LLM loop on macOS: a small local model decides
-whether to call a tool, the Python router runs the tool, and the response is
-either returned raw (fast mode) or rewritten by the LLM (natural mode). The
-focus is minimum decision-to-answer latency.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, request pipeline, framework differences, key decisions
+- [BENCHMARKING.md](BENCHMARKING.md) — how to run benchmarks and read the history log
+- [SETUP.md](SETUP.md) — install and verification
+- [TODO.md](TODO.md) — open work
 
-## Current Entry Points
+## Current goal
 
-- `main.py` — headless agentic tool harness (re-execs into `agent_test.main`).
+Maximize fast local realtime agentic performance on macOS. Two parallel
+frameworks (Pygentic and Hermes) run the same Gemma 4 26B-A4B model against
+the same 11 sandboxed tools so the trade-offs of prompt design and output
+format are measurable head-to-head.
 
-## Headless Agent Test Harness
+## Entry points
 
-`agent_test/` is the raw latency benchmark path:
+- `main.py` — dispatcher: `python main.py [pygentic|hermes] [prompt]`
+- `bench.py` — head-to-head benchmark + history log (`bench.py --history`)
 
-- Gemma 4 24B / 4B-active GGUF
-- llama.cpp server
-- CLI Python agent
-- local Python tool router
-- latency report per command
+## Frameworks
 
-Safe tools currently enabled:
+| | Pygentic | Hermes |
+|---|---|---|
+| Output | Bare JSON | `<tool_call>` XML |
+| Decoding | GBNF grammar | Unconstrained |
+| Strength | Hard format guarantee, lighter cold prefill | Faster warm decode, clean free-text |
 
-- `get_time`
-- `create_file`
-- `read_file`
-- `list_directory`
-- `system_status`
+## Tools
 
-Dangerous tools are intentionally not wired yet:
+11 tools, identical across both frameworks:
 
-- `delete_file`
-- `run_shell_command`
-- `run_python_snippet`
+`get_time`, `create_file`, `append_file`, `delete_file`, `read_file`,
+`list_directory`, `system_status`, `calculate`, `speak` (SSML-aware),
+`speak_file`, `web_search`.
 
-The model only decides which tool to call. The Python router executes tools.
-Each command reports decision, tool, final-response, and total latency.
+All file ops sandboxed inside `<framework>/workspace/`. `speak` and
+`speak_file` understand `<break time="200ms"/>` and `<breath/>` for paced
+narration without speed cost.
 
-## Local Model
+## Local model
 
-The reference harness is configured for:
+- Default file: `gemma-4-26B-A4B-it-Q4_K_M.gguf`
+- Backend: `llama-cpp-python` (in-process, default) or `llama-server` over HTTP
+- Default path:
+  `~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf`
 
-- Model file: `gemma-4-26B-A4B-it-Q4_K_M.gguf`
-- Backend: `llama-cpp-python` (in-process) or `llama-server` over HTTP
-- Expected local path:
-  `/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf`
+## Performance tracking
 
-## Notes
-
-- The current script assumes the model already exists at the configured LM Studio path.
-- Tool routing is JSON-only; the Python router is the single source of truth for tool execution.
+Every request appends to `<framework>/logs/latency.jsonl` with a UTC
+`timestamp` and an optional `run_id` (set during bench runs). Bench runs
+also append an aggregate per (framework, prompt) to
+`bench_history.jsonl` at the project root so trends are easy to read with
+`python bench.py --history`.

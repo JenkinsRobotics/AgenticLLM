@@ -23,8 +23,8 @@ Tools:
 - list_directory — list a directory. args: {"path": "."}
 - system_status — machine status (cpu/disk/load). args: {}
 - calculate — evaluate an arithmetic expression with + - * / ** % //. args: {"expression": "2 + 2"}
-- speak — speak text aloud through the speakers. args: {"text": "hello"}
-- speak_file — read a workspace file and speak its contents aloud. args: {"path": "name.txt"}
+- speak — speak text aloud. Supports SSML: <break time="200ms"/> for pauses, <breath/> for soft inhales. args: {"text": "Hey there <break time=\"200ms\"/> ready when you are <breath/>"}
+- speak_file — read a workspace file and speak its contents aloud (also supports SSML in the file). args: {"path": "name.txt"}
 - web_search — DuckDuckGo web search; returns titles/urls/snippets. args: {"query": "search terms"}
 
 Behavior depends on the turn:
@@ -35,3 +35,19 @@ Behavior depends on the turn:
 # Back-compat aliases — old code paths can still import these names.
 DECISION_SYSTEM_PROMPT = SYSTEM_PROMPT
 FINAL_SYSTEM_PROMPT = SYSTEM_PROMPT
+
+
+def with_mcp_tools(extra_tools: list[tuple[str, str]]) -> str:
+    """Return SYSTEM_PROMPT with an MCP tool section appended.
+
+    `extra_tools` is a list of (qualified_name, description) pairs. Called
+    once at startup when --with-mcp is set; the resulting prompt is reused
+    for the rest of the process so the KV-cache prefix stays stable.
+    """
+    if not extra_tools:
+        return SYSTEM_PROMPT
+    lines = ["", "Extended (MCP) tools — same JSON tool-call format, route through external servers:"]
+    for qualified, desc in extra_tools:
+        short = (desc or "").split("\n", 1)[0]
+        lines.append(f"- {qualified} — {short}")
+    return SYSTEM_PROMPT + "\n".join(lines) + "\n"

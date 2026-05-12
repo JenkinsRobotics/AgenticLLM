@@ -1,0 +1,8 @@
+# Smaller prompt subset for --think bench so background thinking has a
+# chance to complete between turns. Each prompt is followed by a thinking
+# job that takes 10-30s; with the LLM lock that adds to back-to-back latency.
+what time is it
+calculate 47 times 23 plus 12
+list the workspace
+tell me a one sentence story about a robot
+what is the cpu and disk status of this machine
