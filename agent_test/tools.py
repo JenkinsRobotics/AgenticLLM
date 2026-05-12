@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
+import operator as op
 import os
 import platform
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
 
 WORKSPACE = Path(__file__).resolve().parent / "workspace"
+
+# Kokoro is loaded lazily on first speak() call so startup stays fast.
+KOKORO_VOICE = "af_heart"
+KOKORO_LANG = "a"
+KOKORO_SAMPLE_RATE = 24000
+_kokoro_pipeline: Any = None
 
 
 def ensure_workspace() -> None:
@@ -44,6 +53,28 @@ def create_file(path: str, content: str) -> dict[str, Any]:
     }
 
 
+def append_file(path: str, content: str) -> dict[str, Any]:
+    target = workspace_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as fh:
+        fh.write(content)
+    return {
+        "appended": True,
+        "path": str(target.relative_to(WORKSPACE)),
+        "bytes": len(content.encode("utf-8")),
+    }
+
+
+def delete_file(path: str) -> dict[str, Any]:
+    target = workspace_path(path)
+    if not target.exists():
+        return {"deleted": False, "reason": "not found", "path": path}
+    if target.is_dir():
+        return {"deleted": False, "reason": "is a directory", "path": path}
+    target.unlink()
+    return {"deleted": True, "path": str(target.relative_to(WORKSPACE))}
+
+
 def read_file(path: str) -> dict[str, Any]:
     target = workspace_path(path)
     return {
@@ -69,6 +100,74 @@ def list_directory(path: str = ".") -> dict[str, Any]:
             }
         )
     return {"path": str(target.relative_to(WORKSPACE)), "entries": entries}
+
+
+_CALC_OPS: dict[type, Any] = {
+    ast.Add: op.add,
+    ast.Sub: op.sub,
+    ast.Mult: op.mul,
+    ast.Div: op.truediv,
+    ast.Pow: op.pow,
+    ast.Mod: op.mod,
+    ast.FloorDiv: op.floordiv,
+    ast.USub: op.neg,
+    ast.UAdd: op.pos,
+}
+
+
+def _calc_eval(node: Any) -> Any:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _CALC_OPS:
+        return _CALC_OPS[type(node.op)](_calc_eval(node.left), _calc_eval(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_OPS:
+        return _CALC_OPS[type(node.op)](_calc_eval(node.operand))
+    raise ValueError(f"unsupported expression: {ast.dump(node)}")
+
+
+def calculate(expression: str) -> dict[str, Any]:
+    tree = ast.parse(expression, mode="eval")
+    result = _calc_eval(tree.body)
+    if isinstance(result, float) and result.is_integer():
+        result = int(result)
+    return {"expression": expression, "result": result}
+
+
+def _ensure_kokoro() -> Any:
+    global _kokoro_pipeline
+    if _kokoro_pipeline is None:
+        from kokoro import KPipeline
+
+        _kokoro_pipeline = KPipeline(lang_code=KOKORO_LANG)
+    return _kokoro_pipeline
+
+
+def speak(text: str) -> dict[str, Any]:
+    """Synthesize speech with Kokoro and play it through the default output."""
+    import numpy as np
+    import sounddevice as sd
+
+    cleaned = text.strip()
+    if not cleaned:
+        return {"spoken": False, "reason": "empty text"}
+
+    pipe = _ensure_kokoro()
+    started = time.perf_counter()
+    chunks: list[Any] = []
+    for r in pipe(cleaned, voice=KOKORO_VOICE):
+        if r.audio is not None:
+            chunks.append(np.asarray(r.audio, dtype=np.float32))
+    if not chunks:
+        return {"spoken": False, "reason": "no audio generated"}
+
+    audio = np.concatenate(chunks)
+    sd.play(audio, samplerate=KOKORO_SAMPLE_RATE)
+    sd.wait()
+    return {
+        "spoken": True,
+        "chars": len(cleaned),
+        "seconds": round(time.perf_counter() - started, 3),
+    }
 
 
 def system_status() -> dict[str, Any]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ DEFAULT_MODEL_PATH = Path(
 class LLMResult:
     text: str
     latency_s: float
+    ttft_s: float = 0.0
 
 
 class LlamaCppPythonClient:
@@ -29,8 +31,8 @@ class LlamaCppPythonClient:
         model_path: Path = DEFAULT_MODEL_PATH,
         ctx: int = 8192,
         gpu_layers: int = -1,
-        batch: int = 128,
-        ubatch: int = 128,
+        batch: int = 512,
+        ubatch: int = 512,
         flash_attn: bool = True,
         swa_full: bool = False,
         threads: int | None = None,
@@ -78,29 +80,44 @@ class LlamaCppPythonClient:
         temperature: float = 0.0,
         top_p: float = 0.8,
         stream: bool = True,
+        grammar: str | None = None,
     ) -> LLMResult:
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "stream": stream,
+        }
+        if grammar:
+            try:
+                from llama_cpp import LlamaGrammar
+
+                kwargs["grammar"] = LlamaGrammar.from_string(grammar, verbose=False)
+            except Exception as exc:
+                print(f"[grammar] disabled: {exc}", file=sys.stderr)
+
         started = time.perf_counter()
-        completion = self.llm.create_chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stream=stream,
-        )
+        completion = self.llm.create_chat_completion(**kwargs)
         if stream:
-            text = self._collect_stream(completion)
+            text, ttft = self._collect_stream(completion, started)
         else:
             text = completion["choices"][0]["message"]["content"]
-        return LLMResult(text=text.strip(), latency_s=time.perf_counter() - started)
+            ttft = time.perf_counter() - started
+        elapsed = time.perf_counter() - started
+        return LLMResult(text=text.strip(), latency_s=elapsed, ttft_s=ttft)
 
     @staticmethod
-    def _collect_stream(chunks) -> str:
+    def _collect_stream(chunks, started: float) -> tuple[str, float]:
         parts: list[str] = []
+        ttft = 0.0
         for chunk in chunks:
             text = chunk["choices"][0].get("delta", {}).get("content", "")
             if text:
+                if ttft == 0.0:
+                    ttft = time.perf_counter() - started
                 parts.append(text)
-        return "".join(parts)
+        return "".join(parts), ttft
 
     def health_check(self) -> bool:
         return True
@@ -125,8 +142,9 @@ class LlamaCppServerClient:
         temperature: float = 0.0,
         top_p: float = 0.8,
         stream: bool = True,
+        grammar: str | None = None,
     ) -> LLMResult:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
@@ -134,12 +152,18 @@ class LlamaCppServerClient:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+        if grammar:
+            # llama.cpp server extension; ignored by stricter OpenAI-only backends.
+            payload["grammar"] = grammar
+
         started = time.perf_counter()
         if stream:
-            text = self._stream_chat(payload)
+            text, ttft = self._stream_chat(payload, started)
         else:
             text = self._blocking_chat(payload)
-        return LLMResult(text=text.strip(), latency_s=time.perf_counter() - started)
+            ttft = time.perf_counter() - started
+        elapsed = time.perf_counter() - started
+        return LLMResult(text=text.strip(), latency_s=elapsed, ttft_s=ttft)
 
     def _blocking_chat(self, payload: dict[str, Any]) -> str:
         response = requests.post(
@@ -151,8 +175,9 @@ class LlamaCppServerClient:
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
-    def _stream_chat(self, payload: dict[str, Any]) -> str:
+    def _stream_chat(self, payload: dict[str, Any], started: float) -> tuple[str, float]:
         chunks: list[str] = []
+        ttft = 0.0
         with requests.post(
             f"{self.base_url}/v1/chat/completions",
             json=payload,
@@ -175,8 +200,10 @@ class LlamaCppServerClient:
                 delta = data.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content")
                 if content:
+                    if ttft == 0.0:
+                        ttft = time.perf_counter() - started
                     chunks.append(content)
-        return "".join(chunks)
+        return "".join(chunks), ttft
 
     def health_check(self) -> bool:
         try:

@@ -3,16 +3,8 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
+from agent_test.main import main
 
 
 if __name__ == "__main__":
-    code = (
-        "import sys; "
-        "sys.argv=['main.py']+sys.argv[1:]; "
-        "from agent_test.main import main; "
-        "raise SystemExit(main())"
-    )
-    raise SystemExit(subprocess.run([sys.executable, "-c", code, *sys.argv[1:]]).returncode)
+    raise SystemExit(main())

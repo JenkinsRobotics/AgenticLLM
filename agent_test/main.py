@@ -12,7 +12,7 @@ from typing import Any
 
 from . import prompts
 from .llm_client import DEFAULT_MODEL_PATH, LlamaCppPythonClient, LlamaCppServerClient
-from .tool_router import ToolDecision, parse_decision, run_tool
+from .tool_router import DECISION_GRAMMAR, ToolDecision, parse_decision, run_tool
 from .tools import WORKSPACE, ensure_workspace
 
 
@@ -22,8 +22,10 @@ LOG_DIR = Path(__file__).resolve().parent / "logs"
 @dataclass
 class LatencyReport:
     decision: float
+    decision_ttft: float
     tool: float
     final: float
+    final_ttft: float
     total: float
 
 
@@ -32,14 +34,18 @@ def format_tool_result(result: dict[str, Any]) -> str:
         return str(result["datetime"])
     if "content" in result:
         return str(result["content"])
+    if "result" in result and "expression" in result:
+        return f"{result['expression']} = {result['result']}"
+    if result.get("spoken") is True:
+        return f"(spoke {result.get('chars', 0)} chars in {result.get('seconds', 0)}s)"
     return json.dumps(result, indent=2, ensure_ascii=True)
 
 
 def print_latency(report: LatencyReport) -> None:
     print("Latency:")
-    print(f"- decision: {report.decision:.3f}s")
+    print(f"- decision: {report.decision:.3f}s  (ttft {report.decision_ttft:.3f}s)")
     print(f"- tool: {report.tool:.3f}s")
-    print(f"- final: {report.final:.3f}s")
+    print(f"- final: {report.final:.3f}s  (ttft {report.final_ttft:.3f}s)")
     print(f"- total: {report.total:.3f}s")
 
 
@@ -51,15 +57,19 @@ def write_log(entry: dict[str, Any]) -> None:
 
 
 def decide(client, user_text: str):
+    # Grammar stops at end-of-JSON, so this ceiling only matters for tool
+    # calls with long string args (e.g. create_file with multi-paragraph
+    # content). Short routing decisions still finish in ~30-50 tokens.
     return client.chat(
         [
             {"role": "system", "content": prompts.DECISION_SYSTEM_PROMPT},
             {"role": "user", "content": user_text},
         ],
-        max_tokens=128,
+        max_tokens=2048,
         temperature=0.0,
         top_p=0.8,
         stream=True,
+        grammar=DECISION_GRAMMAR,
     )
 
 
@@ -88,7 +98,7 @@ def run_command(client, user_text: str, default_mode: str) -> None:
     except Exception as exc:
         total = time.perf_counter() - total_started
         print(f"LLM request failed: {exc}")
-        print_latency(LatencyReport(0.0, 0.0, 0.0, total))
+        print_latency(LatencyReport(0.0, 0.0, 0.0, 0.0, 0.0, total))
         return
 
     try:
@@ -97,13 +107,17 @@ def run_command(client, user_text: str, default_mode: str) -> None:
         total = time.perf_counter() - total_started
         print(f"Decision parse failed: {exc}")
         print(f"Raw model output: {decision_result.text}")
-        print_latency(LatencyReport(decision_result.latency_s, 0.0, 0.0, total))
+        print_latency(
+            LatencyReport(decision_result.latency_s, decision_result.ttft_s, 0.0, 0.0, 0.0, total)
+        )
         return
 
     if decision.final is not None:
         total = time.perf_counter() - total_started
         print(decision.final)
-        report = LatencyReport(decision_result.latency_s, 0.0, 0.0, total)
+        report = LatencyReport(
+            decision_result.latency_s, decision_result.ttft_s, 0.0, 0.0, 0.0, total
+        )
         print_latency(report)
         write_log(
             {
@@ -124,6 +138,7 @@ def run_command(client, user_text: str, default_mode: str) -> None:
 
     mode = default_mode if default_mode != "auto" else decision.mode
     final_latency = 0.0
+    final_ttft = 0.0
     if mode == "fast":
         answer = format_tool_result(tool_result)
     else:
@@ -134,16 +149,28 @@ def run_command(client, user_text: str, default_mode: str) -> None:
             print(f"Final LLM request failed: {exc}")
             print("Tool result:")
             print(format_tool_result(tool_result))
-            print_latency(LatencyReport(decision_result.latency_s, tool_latency, 0.0, total))
+            print_latency(
+                LatencyReport(
+                    decision_result.latency_s,
+                    decision_result.ttft_s,
+                    tool_latency,
+                    0.0,
+                    0.0,
+                    total,
+                )
+            )
             return
         answer = final_result.text
         final_latency = final_result.latency_s
+        final_ttft = final_result.ttft_s
 
     total = time.perf_counter() - total_started
     report = LatencyReport(
         decision=decision_result.latency_s,
+        decision_ttft=decision_result.ttft_s,
         tool=tool_latency,
         final=final_latency,
+        final_ttft=final_ttft,
         total=total,
     )
     print(answer)
@@ -181,16 +208,20 @@ def cli_loop(client, mode: str) -> int:
 def self_test() -> int:
     ensure_workspace()
     checks = [
-        '{"tool":"get_time","args":{},"mode":"fast"}',
-        '{"tool":"create_file","args":{"path":"self_test/hello.txt","content":"hello"},"mode":"natural"}',
-        '{"tool":"read_file","args":{"path":"self_test/hello.txt"},"mode":"fast"}',
-        '{"tool":"list_directory","args":{"path":"self_test"},"mode":"fast"}',
-        '{"tool":"system_status","args":{},"mode":"fast"}',
+        '{"tool":"get_time","args":{}}',
+        '{"tool":"create_file","args":{"path":"self_test/hello.txt","content":"hello"}}',
+        '{"tool":"append_file","args":{"path":"self_test/hello.txt","content":" world"}}',
+        '{"tool":"read_file","args":{"path":"self_test/hello.txt"}}',
+        '{"tool":"list_directory","args":{"path":"self_test"}}',
+        '{"tool":"calculate","args":{"expression":"(2 + 3) * 4"}}',
+        '{"tool":"delete_file","args":{"path":"self_test/hello.txt"}}',
+        '{"tool":"system_status","args":{}}',
     ]
     for raw in checks:
         decision = parse_decision(raw)
         result = run_tool(decision)
         print(json.dumps({"decision": asdict(decision), "result": result}, ensure_ascii=True))
+    # speak() is excluded from self-test so we don't spam audio.
     return 0
 
 
@@ -201,8 +232,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--ctx", type=int, default=8192)
     parser.add_argument("--gpu-layers", type=int, default=-1, help="-1 = all layers on GPU.")
-    parser.add_argument("--batch", type=int, default=128)
-    parser.add_argument("--ubatch", type=int, default=128)
+    parser.add_argument("--batch", type=int, default=512)
+    parser.add_argument("--ubatch", type=int, default=512)
     parser.add_argument("--no-flash-attn", action="store_true")
     parser.add_argument("--swa-full", action="store_true")
     parser.add_argument("--threads", type=int, default=None)

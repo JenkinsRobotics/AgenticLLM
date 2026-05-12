@@ -5,9 +5,8 @@
 - Confirm the Gemma model path on this Mac.
 - Start `llama-server` with the Gemma GGUF model and benchmark `main.py`.
 - Compare `--mode fast` and `--mode natural` latency for common commands.
-- Add TTFT (time-to-first-token) to the latency report.
-- Try a smaller decision model (e.g. Qwen2.5-3B or Llama-3.2-3B) and compare routing accuracy.
-- Add GBNF / JSON-schema grammar to the decision step so the parser can be deleted.
+- Run real prompts through the grammar-constrained decision path and confirm
+  the model emits only valid tool-calls (no parse fallbacks should trigger).
 - Add dangerous tools only after safe-tool routing is stable.
 
 ## Improvements
