@@ -104,11 +104,11 @@ Two prompts in the default set play audio out loud (`read bench.txt out loud`, `
 
 ## Tools
 
-Both frameworks expose the same 11 tools. File ops are confined to each framework's own `workspace/` — even if you ask the model to "save to Desktop," it lands in the workspace and the reply tells you where it actually went.
+Both frameworks expose the same 15 tools (11 in-process + 4 unified-memory tools added below). File ops are confined to each framework's own `workspace/` — even if you ask the model to "save to Desktop," it lands in the workspace and the reply tells you where it actually went. Memory lives in a shared `memory/` directory at the project root so every interface sees the same identity and facts.
 
 | Tool | Args | Purpose | Default mode |
 |---|---|---|---|
-| `get_time` | — | Current local date/time | fast |
+| `get_time` | optional `timezone` (IANA) | Current date/time, optionally in a given timezone | fast |
 | `create_file` | `path`, `content` | Write a text file (overwrites) | natural |
 | `append_file` | `path`, `content` | Append to an existing file | natural |
 | `delete_file` | `path` | Delete a file in the workspace | natural |
@@ -119,6 +119,10 @@ Both frameworks expose the same 11 tools. File ops are confined to each framewor
 | `speak` | `text` | Kokoro TTS through default audio output | fast |
 | `speak_file` | `path` | Read a file and speak it (single-call narration) | fast |
 | `web_search` | `query` | DuckDuckGo via `ddgs`, no API key | natural |
+| `remember` | `key`, `value` | Save a fact to shared `memory/facts.json` | fast |
+| `recall` | `key` | Look up a previously stored fact | fast |
+| `list_facts` | — | List every fact currently in memory | fast |
+| `forget` | `key` | Remove a stored fact | fast |
 
 `fast` mode returns the raw tool result without a second LLM call. `natural` mode runs `finalize` so the answer is a short natural-language summary. Override either with `--mode fast` / `--mode natural`.
 
@@ -138,7 +142,15 @@ AgenticLLM/
 │   ├── logs/            # latency.jsonl (append-only history)
 │   └── workspace/       # Sandboxed file ops
 ├── hermes/             # Nous Function-Calling framework (same shape)
-└── docs/               # Project notes (PROJECT.md, SETUP.md, TODO.md)
+├── memory/             # Unified memory — shared across all interfaces
+│   ├── identity.md      # Stable persona, prepended to every system prompt
+│   ├── facts.json       # Atomic key/value scratchpad
+│   └── memory_module.py # Shared read/write helpers
+├── mcp_bridge.py       # Opt-in MCP client (--with-mcp)
+├── mcp_config.json     # MCP servers to connect to when MCP is enabled
+├── thinking_runner.py  # Opt-in background thinking (--think)
+├── thinking.jsonl      # Background thinking log (written when --think runs)
+└── docs/               # PROJECT.md, ARCHITECTURE.md, BENCHMARKING.md, SETUP.md, TODO.md
 ```
 
 ## Performance notes

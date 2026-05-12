@@ -23,16 +23,37 @@ from .tools import WORKSPACE, ensure_workspace
 LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 
+def _build_base_system_prompt(with_identity: bool = False) -> str:
+    """Optionally prepend identity.md to the framework's tool-routing prompt."""
+    if not with_identity:
+        return prompts.SYSTEM_PROMPT
+    try:
+        from memory.memory_module import load_identity
+
+        identity = load_identity()
+    except Exception:
+        identity = ""
+    if identity:
+        return f"{identity}\n\n{prompts.SYSTEM_PROMPT}"
+    return prompts.SYSTEM_PROMPT
+
+
 # Pipeline state — mutated only at init time. decide/finalize read these; the
 # default values keep the fast path identical to pre-extension behavior.
 _pipeline: dict[str, Any] = {
-    "system_prompt": prompts.SYSTEM_PROMPT,
+    "system_prompt": _build_base_system_prompt(with_identity=False),
     "grammar": tool_router.DECISION_GRAMMAR,
     "llm_lock": None,            # threading.Lock() when --think is on
     "thinking_runner": None,     # ThinkingRunner when --think is on
     "with_mcp": False,
     "with_thinking": False,
+    "with_memory": False,
 }
+
+# Session-scoped message history. Populated only when --with-memory is set.
+# Contains pairs of {"role":"user"} + {"role":"assistant"} from prior turns.
+_session_history: list[dict[str, str]] = []
+_MAX_HISTORY_MESSAGES = 20  # 10 turns of (user, assistant)
 
 
 @dataclass
@@ -54,6 +75,22 @@ def format_tool_result(result: dict[str, Any]) -> str:
         return f"{result['expression']} = {result['result']}"
     if result.get("spoken") is True:
         return f"(spoke {result.get('chars', 0)} chars in {result.get('seconds', 0)}s)"
+    if result.get("remembered") is True:
+        val = str(result.get("value", ""))
+        if len(val) > 80:
+            val = val[:77] + "..."
+        return f"Saved: {result.get('key', '?')} = {val}"
+    if result.get("forgotten") in (True, False) and "key" in result:
+        if result["forgotten"]:
+            return f"Forgot: {result['key']}"
+        return f"(nothing to forget for key={result['key']!r})"
+    if "found" in result and "key" in result and "value" in result:
+        return str(result["value"]) if result["found"] else f"(no fact stored for {result['key']!r})"
+    if "facts" in result and isinstance(result["facts"], dict):
+        facts = result["facts"]
+        if not facts:
+            return "(no facts stored yet)"
+        return "\n".join(f"- {k}: {v}" for k, v in sorted(facts.items()))
     return json.dumps(result, indent=2, ensure_ascii=True)
 
 
@@ -77,16 +114,50 @@ def write_log(entry: dict[str, Any]) -> None:
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
+    if _pipeline["with_memory"]:
+        _record_turn(entry)
+
+
+def _record_turn(entry: dict[str, Any]) -> None:
+    """Append this turn to the cross-session episodic log AND in-process history.
+
+    Only called when --with-memory is on. The session history is what the
+    model sees as conversation context on the next decide/finalize call —
+    this is what fixes the key-consistency problem.
+    """
+    user = entry.get("user")
+    decision_raw = entry.get("decision_raw")
+    if not user or not decision_raw:
+        return
+
+    _session_history.append({"role": "user", "content": user})
+    _session_history.append({"role": "assistant", "content": decision_raw})
+    overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+    if overflow > 0:
+        del _session_history[:overflow]
+
+    try:
+        from memory.memory_module import append_episodic
+
+        append_episodic({
+            "timestamp": entry.get("timestamp"),
+            "framework": "pygentic",
+            "user": user,
+            "decision_raw": decision_raw,
+            "answer": entry.get("answer") or entry.get("final"),
+            "run_id": entry.get("run_id"),
+        })
+    except Exception as exc:
+        print(f"[pygentic] episodic append failed: {exc}", file=sys.stderr, flush=True)
+
 
 def decide(client, user_text: str):
-    # Grammar stops at end-of-JSON, so this ceiling only matters for tool
-    # calls with long string args (e.g. create_file with multi-paragraph
-    # content). Short routing decisions still finish in ~30-50 tokens.
+    messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
+    if _session_history:
+        messages.extend(_session_history)
+    messages.append({"role": "user", "content": user_text})
     return client.chat(
-        [
-            {"role": "system", "content": _pipeline["system_prompt"]},
-            {"role": "user", "content": user_text},
-        ],
+        messages,
         max_tokens=2048,
         temperature=0.0,
         top_p=0.8,
@@ -96,16 +167,19 @@ def decide(client, user_text: str):
 
 
 def finalize(client, user_text: str, decision: ToolDecision, tool_result: dict[str, Any]):
+    messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
+    if _session_history:
+        messages.extend(_session_history)
+    messages.extend([
+        {"role": "user", "content": user_text},
+        {
+            "role": "assistant",
+            "content": json.dumps({"tool": decision.tool, "args": decision.args}, ensure_ascii=True),
+        },
+        {"role": "user", "content": "Tool result: " + json.dumps(tool_result, ensure_ascii=True)},
+    ])
     return client.chat(
-        [
-            {"role": "system", "content": _pipeline["system_prompt"]},
-            {"role": "user", "content": user_text},
-            {
-                "role": "assistant",
-                "content": json.dumps({"tool": decision.tool, "args": decision.args}, ensure_ascii=True),
-            },
-            {"role": "user", "content": "Tool result: " + json.dumps(tool_result, ensure_ascii=True)},
-        ],
+        messages,
         max_tokens=256,
         temperature=0.0,
         top_p=0.8,
@@ -296,6 +370,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Opt-in: run a background thinking call after each turn; logs to thinking.jsonl.",
     )
+    parser.add_argument(
+        "--with-memory",
+        action="store_true",
+        help="Opt-in: inject identity.md, maintain session history, and append every turn to memory/episodic.jsonl for cross-session continuity.",
+    )
     return parser.parse_args()
 
 
@@ -307,6 +386,7 @@ def init_from_env(client) -> None:
     class _A:
         with_mcp = False
         think = False
+        with_memory = False
 
     init_extensions(_A(), client)
 
@@ -320,11 +400,34 @@ def shutdown_extensions(wait: bool = True) -> None:
 
 def init_extensions(args, client) -> None:
     """Mutate _pipeline once based on CLI flags + env vars. Default values
-    keep the fast path identical when neither extension is enabled."""
+    keep the fast path identical when no extension is enabled."""
     with_mcp = args.with_mcp or os.environ.get("BENCH_WITH_MCP") == "1"
     with_thinking = args.think or os.environ.get("BENCH_WITH_THINKING") == "1"
+    with_memory = args.with_memory or os.environ.get("BENCH_WITH_MEMORY") == "1"
     _pipeline["with_mcp"] = with_mcp
     _pipeline["with_thinking"] = with_thinking
+    _pipeline["with_memory"] = with_memory
+
+    if with_memory:
+        # Inject identity at the top of the system prompt so the model behaves
+        # as the same individual across sessions.
+        _pipeline["system_prompt"] = _build_base_system_prompt(with_identity=True)
+        # Preload the last few turns from the cross-session episodic log so
+        # the model has conversational context even on a fresh process start.
+        try:
+            from memory.memory_module import load_recent_turns
+
+            recent = load_recent_turns(n=5)
+            if recent:
+                _session_history.extend(recent)
+                print(
+                    f"[pygentic] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
+                    flush=True,
+                )
+            else:
+                print("[pygentic] memory on — identity injected; no prior episodic turns.", flush=True)
+        except Exception as exc:
+            print(f"[pygentic] --with-memory partial: {exc}", file=sys.stderr, flush=True)
 
     if with_mcp:
         try:
@@ -334,7 +437,15 @@ def init_extensions(args, client) -> None:
             specs = registry.list_tools()
             if specs:
                 extra = [(s.qualified_name, s.description) for s in specs]
-                _pipeline["system_prompt"] = prompts.with_mcp_tools(extra)
+                # Rebuild the system prompt so identity stays prepended.
+                try:
+                    from memory.memory_module import load_identity
+
+                    identity = load_identity()
+                except Exception:
+                    identity = ""
+                base = prompts.with_mcp_tools(extra)
+                _pipeline["system_prompt"] = f"{identity}\n\n{base}" if identity else base
                 names = list(tool_router.SAFE_TOOLS.keys()) + [s.qualified_name for s in specs]
                 _pipeline["grammar"] = tool_router.build_decision_grammar(names)
                 print(f"[pygentic] MCP enabled with {len(specs)} extended tool(s).", flush=True)
@@ -347,7 +458,11 @@ def init_extensions(args, client) -> None:
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock
-            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(client, "pygentic", lock)
+            # Pass the (possibly MCP-extended) system prompt so the thinking
+            # call shares the KV cache prefix with decide/finalize.
+            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
+                client, "pygentic", lock, _pipeline["system_prompt"]
+            )
             print("[pygentic] background thinking enabled — see thinking.jsonl.", flush=True)
         except Exception as exc:
             print(f"[pygentic] --think failed: {exc}", file=sys.stderr, flush=True)

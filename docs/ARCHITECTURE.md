@@ -150,6 +150,74 @@ Every `run_command` writes one line to `<framework>/logs/latency.jsonl`:
 `run_id` is set by `bench.py` so all entries from one benchmark run group
 together. Interactive sessions still get a `timestamp` but no `run_id`.
 
+## Memory (opt-in via `--with-memory`, unified across interfaces)
+
+Memory is a project-root sibling of the frameworks — `memory/` — so every
+agent process and future interface (voice, Discord, web) reads and writes
+the same files. That's what makes the agent feel like the same individual
+no matter where it's running.
+
+Four layers, the first three wired today:
+
+| Layer | File | Tools | Purpose |
+|---|---|---|---|
+| **Identity** | `memory/identity.md` | (none — auto-loaded) | Stable persona, voice, behavioral hints. Prepended to every framework's system prompt when `--with-memory` is set. ~100 tokens of prefill, cached after the first call. |
+| **Facts** | `memory/facts.json` | `remember(key, value)`, `recall(key)`, `forget(key)`, `list_facts` | Key/value scratchpad the agent self-curates as the user shares preferences or topics. Atomic writes (temp + fsync + rename) so concurrent processes never see half-written files. **Tools are always registered** (not gated by --with-memory); identity injection just primes the model to use them. |
+| **Episodic** | `memory/episodic.jsonl` | (no tool yet; auto-loaded) | Append-only per-turn log across all interfaces. When `--with-memory` is set, every turn is appended *and* the last N (default 5) are loaded into the session history at startup so the model sees prior conversation context. |
+| **Semantic** *(future, optional)* | `memory/semantic/` | `recall_similar(query)` | FAISS-backed embeddings for "what did we talk about last week" queries. |
+
+### Why opt-in (matches MCP/thinking)
+
+The user's design principle is "default stays fast; everything else is
+opt-in." Identity + history adds ~100-300 prefill tokens (cached) plus an
+accumulating message-history prefix as the session continues. Small but
+measurable. Making it opt-in lets the bench A/B raw vs memory cleanly.
+
+For interactive product use, agents should be launched with `--with-memory`
+so they feel like Lilith. For benchmark comparisons, `default` mode runs
+without identity to isolate framework cost from memory cost.
+
+### Session history (the Phase-2 addition)
+
+When `--with-memory` is set, each framework keeps an in-process
+`_session_history` list of `(user_msg, assistant_decision)` pairs. Every
+new `decide()` / `finalize()` call sends:
+
+```
+[system, ...history, user_text]
+```
+
+The KV-cache prefix is preserved: the system prompt + earlier history
+turns are reused; only the new user message needs fresh prefill. After
+each turn, the new pair is appended to history (capped at the last 10
+turns to bound prefix growth) and also written to `memory/episodic.jsonl`
+for cross-session continuity.
+
+This is what fixes the "key consistency" problem we observed in Phase 1:
+the model can now see "I called `remember(key='X')`" three turns ago, so
+when asked to recall, it uses the same key.
+
+### Implementation details
+
+- `memory/memory_module.py` is the shared module both frameworks import.
+  Same functions, same files, same view of the world.
+- Each framework's `_build_base_system_prompt()` prepends identity.md to its
+  own routing prompt at module-load time. MCP-extended prompts also flow
+  through this helper so identity stays at the top.
+- Atomic write strategy: temp file in the same directory → `fsync` → `os.replace`.
+  Cross-process safety follows from `os.replace` being atomic on POSIX.
+- In-process safety: a `threading.Lock` around the read-modify-write cycle
+  so two threads in one process never lose a write to each other.
+
+### Memory + extensions
+
+- **Memory + MCP**: independent. Memory tools live in-process for speed
+  (sub-millisecond). MCP tools handle external capability (fetch, browser,
+  etc.). Both addressable from the same router.
+- **Memory + thinking**: thinking jobs also see the identity layer because
+  they reuse the framework's `_pipeline["system_prompt"]`. So background
+  reasoning is "as Lilith" too, not a generic chain-of-thought voice.
+
 ## Opt-in extensions
 
 The default pipeline is hand-tuned for speed. Two extensions are available as
@@ -231,6 +299,9 @@ trivial tool calls.
 |-------------------------------------|------------------------------------------------------|
 | `main.py`                           | Dispatcher: import + call the chosen framework       |
 | `bench.py`                          | Head-to-head runner, history aggregator              |
+| `memory/memory_module.py`           | Shared persistent memory (identity + facts)          |
+| `memory/identity.md`                | Stable persona, prepended to every system prompt     |
+| `memory/facts.json`                 | Atomic key/value store for the agent's curated facts |
 | `mcp_bridge.py`                     | Opt-in MCP client + async-to-sync bridge             |
 | `mcp_config.json`                   | List of MCP servers to connect to when --with-mcp    |
 | `thinking_runner.py`                | Opt-in background thinking runner                    |

@@ -15,7 +15,7 @@ to save to their Desktop / Downloads / etc., still save to the workspace —
 the follow-up answer will explain where the file actually went.
 
 Tools:
-- get_time — current local date/time. args: {}
+- get_time — current date/time; optional IANA timezone. args: {} or {"timezone": "Asia/Shanghai"}
 - create_file — write a text file (overwrites). args: {"path": "name.txt", "content": str}
 - append_file — append text to a file. args: {"path": "name.txt", "content": str}
 - delete_file — delete a file in the workspace. args: {"path": "name.txt"}
@@ -26,6 +26,10 @@ Tools:
 - speak — speak text aloud. Supports SSML: <break time="200ms"/> for pauses, <breath/> for soft inhales. args: {"text": "Hey there <break time=\"200ms\"/> ready when you are <breath/>"}
 - speak_file — read a workspace file and speak its contents aloud (also supports SSML in the file). args: {"path": "name.txt"}
 - web_search — DuckDuckGo web search; returns titles/urls/snippets. args: {"query": "search terms"}
+- remember — save a fact in persistent unified memory. args: {"key": "video_length", "value": "90 seconds"}
+- recall — fetch a previously saved fact. args: {"key": "video_length"}
+- list_facts — list every fact currently in memory. args: {}
+- forget — remove a stored fact. args: {"key": "video_length"}
 
 Behavior depends on the turn:
 - First turn (user asks): output JSON only — either {"tool":"name","args":{...}} or {"final":"short answer"}.

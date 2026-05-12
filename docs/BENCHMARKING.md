@@ -40,6 +40,20 @@ with a custom prompt file if you don't want TTS during timing.
 .venv/bin/python bench.py --history --history-limit 10
 ```
 
+## Cross-mode comparison
+
+To compare the latest runs of multiple modes side-by-side in one table:
+
+```bash
+.venv/bin/python bench.py --compare default think memory
+.venv/bin/python bench.py --compare default mcp memory
+```
+
+The view picks the most recent `run_id` per `mode_tag` and lays prompts as
+rows, with one (pygentic, hermes) pair of columns per mode. Useful for
+seeing "did thinking slow anything down?" or "does memory restore key
+consistency?" at a glance.
+
 Output groups by prompt and shows recent runs side-by-side. Example:
 
 ```
@@ -56,6 +70,31 @@ You can grep the file directly too — it's just JSONL:
 ```bash
 jq -r 'select(.framework=="pygentic" and .prompt=="what time is it") | "\(.run_id)\t\(.total)"' bench_history.jsonl
 ```
+
+## Correctness validation, not just latency
+
+Each prompt in `DEFAULT_PROMPTS` is a `(text, expected_tool)` tuple. After
+every turn, bench.py reads the framework's most recent log entry and
+checks:
+
+- Did the model pick `expected_tool`?
+- Or, when `expected_tool` is `None`, did it return a free-text answer?
+- Or, when `expected_tool` is `"*"`, did it call any tool at all?
+- Was the entry tagged with `parse_fallback="silent_format_fail"` (i.e. the
+  model emitted malformed tool-call syntax that got salvaged as a final)?
+
+A per-framework summary line at the end of each run reports `N/M passed`
+and lists any failures. This is what catches the failure mode where the
+model emits `<|tool_call>call:foo{}<tool_call|>` and the parser silently
+falls through to a "final" answer — the bench used to record `total:
+1.9s` and call it a win; now it explicitly fails.
+
+The hardened Hermes parser (`hermes/tool_router.py`) accepts five format
+variants beyond the strict `<tool_call>{...}</tool_call>`:
+chatml-style `<|tool_call|>` delimiters, markdown fences, and the
+`call:tool_name{args}` form. Recovered calls are tagged with their
+fallback label in the log entry so you can see which variants Gemma
+drifted toward most often.
 
 ## What to watch in the numbers
 

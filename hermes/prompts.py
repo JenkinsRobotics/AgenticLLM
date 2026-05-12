@@ -16,8 +16,17 @@ from typing import Any
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "get_time",
-        "description": "Get the current local date and time.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "description": "Get the current date and time. Optionally pass an IANA timezone (e.g. 'Asia/Shanghai', 'America/New_York') to get the time there instead of local time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "Optional IANA timezone name. Omit for local time.",
+                },
+            },
+            "required": [],
+        },
     },
     {
         "name": "create_file",
@@ -112,6 +121,41 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "max_results": {"type": "integer"},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "remember",
+        "description": "Save a fact in persistent unified memory shared across all agent processes. Use proactively when the user shares a preference or fact worth keeping.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["key", "value"],
+        },
+    },
+    {
+        "name": "recall",
+        "description": "Fetch a previously saved fact by key. Returns found=false if the key is unknown.",
+        "parameters": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "list_facts",
+        "description": "List every fact currently in unified memory.",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "forget",
+        "description": "Remove a stored fact by key.",
+        "parameters": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
         },
     },
 ]

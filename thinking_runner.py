@@ -31,26 +31,41 @@ ROOT = Path(__file__).resolve().parent
 LOG_PATH = ROOT / "thinking.jsonl"
 
 
-THINKING_SYSTEM_PROMPT = """You are a careful planning agent thinking through the user's request.
-
-Think step by step about:
+# The "think step by step" instruction is delivered as a USER turn rather
+# than a separate system prompt, so the system-prompt prefix in the KV cache
+# is shared with decide/finalize. Same lesson as the earlier finalize
+# cache-clobber fix.
+THINKING_USER_DIRECTIVE = """Don't answer the user's last message normally. Instead, briefly think through it step by step:
 1. What the user wants accomplished
 2. What information or decisions are required
 3. Possible approaches and their tradeoffs
-4. The recommended plan in 3-5 concrete steps
+4. A recommended plan in 3-5 concrete steps
 
-Be specific. Keep the whole response under 200 words. No tool calls — just analysis.
+No tool calls in this response — analysis only. Keep it under 200 words.
 """
 
 
 class ThinkingRunner:
     """One per process. Submits thinking jobs to a single-worker pool that
-    serializes against a shared LLM lock."""
+    serializes against a shared LLM lock.
 
-    def __init__(self, client: Any, framework: str, llm_lock: threading.Lock) -> None:
+    base_system_prompt is the framework's current main system prompt. Reusing
+    it here keeps the KV cache prefix shared with decide/finalize, so a
+    thinking call no longer warms-up a separate prefix that would clobber
+    the cache for the next decision.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        framework: str,
+        llm_lock: threading.Lock,
+        base_system_prompt: str,
+    ) -> None:
         self.client = client
         self.framework = framework
         self.llm_lock = llm_lock
+        self.base_system_prompt = base_system_prompt
         # max_workers=1 so we never queue multiple think jobs against the model.
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="thinking")
         self._pending = 0
@@ -81,8 +96,11 @@ class ThinkingRunner:
         with self.llm_lock:
             result = self.client.chat(
                 [
-                    {"role": "system", "content": THINKING_SYSTEM_PROMPT},
+                    # Same system prompt as decide/finalize — cache-friendly.
+                    {"role": "system", "content": self.base_system_prompt},
                     {"role": "user", "content": user_text},
+                    # Override the routing behavior for this turn only.
+                    {"role": "user", "content": THINKING_USER_DIRECTIVE},
                 ],
                 max_tokens=512,
                 temperature=0.7,

@@ -35,11 +35,24 @@ def workspace_path(path: str) -> Path:
     return target
 
 
-def get_time() -> dict[str, Any]:
-    now = dt.datetime.now().astimezone()
+def get_time(timezone: str | None = None) -> dict[str, Any]:
+    """Current local date/time, or in a specific IANA timezone if provided.
+
+    Examples: timezone="Asia/Shanghai", "America/New_York", "Europe/London".
+    """
+    if timezone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            now = dt.datetime.now(ZoneInfo(timezone))
+        except Exception as exc:
+            return {"error": f"unknown timezone: {timezone!r} ({exc})"}
+    else:
+        now = dt.datetime.now().astimezone()
     return {
         "datetime": now.strftime("%Y-%m-%d %I:%M:%S %p %Z"),
         "iso": now.isoformat(timespec="seconds"),
+        "timezone": str(now.tzinfo),
     }
 
 
@@ -234,6 +247,39 @@ def speak_file(path: str) -> dict[str, Any]:
     result = speak(text)
     result["from_file"] = str(target.relative_to(WORKSPACE))
     return result
+
+
+def remember(key: str, value: str) -> dict[str, Any]:
+    """Store a fact in unified memory shared across all agent processes."""
+    from memory.memory_module import remember as _remember
+
+    _remember(key, value)
+    return {"remembered": True, "key": key, "value": value}
+
+
+def recall(key: str) -> dict[str, Any]:
+    """Retrieve a fact previously stored via remember()."""
+    from memory.memory_module import recall as _recall
+
+    value = _recall(key)
+    if value is None:
+        return {"found": False, "key": key}
+    return {"found": True, "key": key, "value": value}
+
+
+def forget(key: str) -> dict[str, Any]:
+    """Remove a stored fact. Returns whether it existed."""
+    from memory.memory_module import forget as _forget
+
+    existed = _forget(key)
+    return {"forgotten": existed, "key": key}
+
+
+def list_facts() -> dict[str, Any]:
+    """List every fact currently stored in unified memory."""
+    from memory.memory_module import list_facts as _list_facts
+
+    return {"facts": _list_facts()}
 
 
 def web_search(query: str, max_results: int = 5) -> dict[str, Any]:

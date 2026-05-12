@@ -30,15 +30,37 @@ from .tools import WORKSPACE, ensure_workspace
 LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 
+def _build_base_system_prompt(
+    extra_schemas: list[dict[str, Any]] | None = None,
+    with_identity: bool = False,
+) -> str:
+    """Optionally prepend identity.md to the Hermes function-calling prompt."""
+    base = prompts.system_prompt(extra_schemas)
+    if not with_identity:
+        return base
+    try:
+        from memory.memory_module import load_identity
+
+        identity = load_identity()
+    except Exception:
+        identity = ""
+    return f"{identity}\n\n{base}" if identity else base
+
+
 # Pipeline state — mutated only at init time. Default values keep the fast
 # path identical to pre-extension behavior.
 _pipeline: dict[str, Any] = {
-    "system_prompt": prompts.system_prompt(),
+    "system_prompt": _build_base_system_prompt(with_identity=False),
     "llm_lock": None,
     "thinking_runner": None,
     "with_mcp": False,
     "with_thinking": False,
+    "with_memory": False,
 }
+
+# Session-scoped message history. Populated only when --with-memory is set.
+_session_history: list[dict[str, str]] = []
+_MAX_HISTORY_MESSAGES = 20
 
 
 @dataclass
@@ -60,6 +82,22 @@ def format_tool_result(result: dict[str, Any]) -> str:
         return f"{result['expression']} = {result['result']}"
     if result.get("spoken") is True:
         return f"(spoke {result.get('chars', 0)} chars in {result.get('seconds', 0)}s)"
+    if result.get("remembered") is True:
+        val = str(result.get("value", ""))
+        if len(val) > 80:
+            val = val[:77] + "..."
+        return f"Saved: {result.get('key', '?')} = {val}"
+    if result.get("forgotten") in (True, False) and "key" in result:
+        if result["forgotten"]:
+            return f"Forgot: {result['key']}"
+        return f"(nothing to forget for key={result['key']!r})"
+    if "found" in result and "key" in result and "value" in result:
+        return str(result["value"]) if result["found"] else f"(no fact stored for {result['key']!r})"
+    if "facts" in result and isinstance(result["facts"], dict):
+        facts = result["facts"]
+        if not facts:
+            return "(no facts stored yet)"
+        return "\n".join(f"- {k}: {v}" for k, v in sorted(facts.items()))
     return json.dumps(result, indent=2, ensure_ascii=True)
 
 
@@ -83,15 +121,47 @@ def write_log(entry: dict[str, Any]) -> None:
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
+    if _pipeline["with_memory"]:
+        _record_turn(entry)
+
+
+def _record_turn(entry: dict[str, Any]) -> None:
+    """Append this turn to the cross-session episodic log + session history."""
+    user = entry.get("user")
+    decision_raw = entry.get("decision_raw")
+    if not user or not decision_raw:
+        return
+
+    _session_history.append({"role": "user", "content": user})
+    _session_history.append({"role": "assistant", "content": decision_raw})
+    overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+    if overflow > 0:
+        del _session_history[:overflow]
+
+    try:
+        from memory.memory_module import append_episodic
+
+        append_episodic({
+            "timestamp": entry.get("timestamp"),
+            "framework": "hermes",
+            "user": user,
+            "decision_raw": decision_raw,
+            "answer": entry.get("answer") or entry.get("final"),
+            "run_id": entry.get("run_id"),
+        })
+    except Exception as exc:
+        print(f"[hermes] episodic append failed: {exc}", file=sys.stderr, flush=True)
+
 
 def decide(client, user_text: str):
     # No grammar — Hermes idiom is unconstrained decoding. The system prompt
     # carries all tool schemas as JSON, so prefill is heavier than Pygentic.
+    messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
+    if _session_history:
+        messages.extend(_session_history)
+    messages.append({"role": "user", "content": user_text})
     return client.chat(
-        [
-            {"role": "system", "content": _pipeline["system_prompt"]},
-            {"role": "user", "content": user_text},
-        ],
+        messages,
         max_tokens=2048,
         temperature=0.0,
         top_p=0.8,
@@ -109,16 +179,19 @@ def finalize(
     tool_response = json.dumps(
         {"name": decision.tool, "content": tool_result}, ensure_ascii=True
     )
+    messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
+    if _session_history:
+        messages.extend(_session_history)
+    messages.extend([
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": raw_decision},
+        {
+            "role": "user",
+            "content": f"<tool_response>\n{tool_response}\n</tool_response>\n\n{prompts.FINAL_INSTRUCTIONS}",
+        },
+    ])
     return client.chat(
-        [
-            {"role": "system", "content": _pipeline["system_prompt"]},
-            {"role": "user", "content": user_text},
-            {"role": "assistant", "content": raw_decision},
-            {
-                "role": "user",
-                "content": f"<tool_response>\n{tool_response}\n</tool_response>\n\n{prompts.FINAL_INSTRUCTIONS}",
-            },
-        ],
+        messages,
         max_tokens=512,
         temperature=0.0,
         top_p=0.8,
@@ -169,11 +242,19 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
             decision_result.latency_s, decision_result.ttft_s, 0.0, 0.0, 0.0, total
         )
         print_latency(report)
+        # If decision.final is populated and the raw output contained a
+        # tool-call-shaped fragment we couldn't recover, the bench should
+        # treat this as a silent format failure rather than a true final
+        # answer. We surface it via parse_fallback="silent_format_fail".
+        raw = decision_result.text or ""
+        looks_like_tool_call = any(t in raw for t in ("tool_call", "call:"))
+        parse_fallback = "silent_format_fail" if looks_like_tool_call else None
         write_log(
             {
                 "user": user_text,
                 "decision_raw": decision_result.text,
                 "final": decision.final,
+                "parse_fallback": parse_fallback,
                 "latency": asdict(report),
             }
         )
@@ -230,6 +311,7 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
             "user": user_text,
             "decision_raw": decision_result.text,
             "decision": asdict(decision),
+            "parse_fallback": decision.parse_fallback,
             "tool_result": tool_result,
             "answer": answer,
             "mode": mode,
@@ -308,6 +390,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Opt-in: run a background thinking call after each turn; logs to thinking.jsonl.",
     )
+    parser.add_argument(
+        "--with-memory",
+        action="store_true",
+        help="Opt-in: inject identity.md, maintain session history, and append every turn to memory/episodic.jsonl.",
+    )
     return parser.parse_args()
 
 
@@ -319,6 +406,7 @@ def init_from_env(client) -> None:
     class _A:
         with_mcp = False
         think = False
+        with_memory = False
 
     init_extensions(_A(), client)
 
@@ -334,8 +422,27 @@ def init_extensions(args, client) -> None:
     """Mutate _pipeline once based on CLI flags + env vars."""
     with_mcp = args.with_mcp or os.environ.get("BENCH_WITH_MCP") == "1"
     with_thinking = args.think or os.environ.get("BENCH_WITH_THINKING") == "1"
+    with_memory = args.with_memory or os.environ.get("BENCH_WITH_MEMORY") == "1"
     _pipeline["with_mcp"] = with_mcp
     _pipeline["with_thinking"] = with_thinking
+    _pipeline["with_memory"] = with_memory
+
+    if with_memory:
+        _pipeline["system_prompt"] = _build_base_system_prompt(with_identity=True)
+        try:
+            from memory.memory_module import load_recent_turns
+
+            recent = load_recent_turns(n=5)
+            if recent:
+                _session_history.extend(recent)
+                print(
+                    f"[hermes] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
+                    flush=True,
+                )
+            else:
+                print("[hermes] memory on — identity injected; no prior episodic turns.", flush=True)
+        except Exception as exc:
+            print(f"[hermes] --with-memory partial: {exc}", file=sys.stderr, flush=True)
 
     if with_mcp:
         try:
@@ -352,7 +459,8 @@ def init_extensions(args, client) -> None:
                     }
                     for s in specs
                 ]
-                _pipeline["system_prompt"] = prompts.system_prompt(extra_schemas)
+                # Rebuild via the helper so identity stays prepended.
+                _pipeline["system_prompt"] = _build_base_system_prompt(extra_schemas)
                 print(f"[hermes] MCP enabled with {len(specs)} extended tool(s).", flush=True)
         except Exception as exc:
             print(f"[hermes] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
@@ -363,7 +471,9 @@ def init_extensions(args, client) -> None:
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock
-            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(client, "hermes", lock)
+            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
+                client, "hermes", lock, _pipeline["system_prompt"]
+            )
             print("[hermes] background thinking enabled — see thinking.jsonl.", flush=True)
         except Exception as exc:
             print(f"[hermes] --think failed: {exc}", file=sys.stderr, flush=True)

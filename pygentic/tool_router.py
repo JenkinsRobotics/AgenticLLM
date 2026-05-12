@@ -31,6 +31,10 @@ SAFE_TOOLS: dict[str, ToolFunc] = {
     "speak": tools.speak,
     "speak_file": tools.speak_file,
     "web_search": tools.web_search,
+    "remember": tools.remember,
+    "recall": tools.recall,
+    "forget": tools.forget,
+    "list_facts": tools.list_facts,
 }
 
 # Per-tool default response mode in --mode auto. Tools whose raw output already
@@ -47,6 +51,10 @@ TOOL_DEFAULT_MODE: dict[str, str] = {
     "speak": "fast",
     "speak_file": "fast",
     "web_search": "natural",
+    "remember": "fast",
+    "recall": "fast",
+    "forget": "fast",
+    "list_facts": "fast",
 }
 
 # MCP tools default to "natural" — their output is structured content that
