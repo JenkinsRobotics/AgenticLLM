@@ -1,0 +1,767 @@
+
+[bench] run_id = 2026-05-13T18:18:43+00:00  mode = think
+
+=== python_custom_json: loading model ===
+[llama.cpp] Loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[llama.cpp] Loaded in 1.3s.
+[llama.cpp] Warming up...
+[llama.cpp] Warm-up done in 0.1s.
+
+[python_custom_json] background thinking enabled — see thinking.jsonl.
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[python_custom_json] Kokoro warmed in 5.204s.
+
+--- python_custom_json :: 'what time is it'
+2026-05-13 11:18:52 AM PDT
+Latency:
+- decision: 1.295s  (ttft 0.901s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.296s
+    [check] matched 'get_time'
+
+--- python_custom_json :: 'what time is it in shanghai'
+2026-05-14 02:18:55 AM CST
+Latency:
+- decision: 0.755s  (ttft 0.105s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.757s
+    [check] matched 'get_time'
+
+--- python_custom_json :: 'calculate 47 times 23 plus 12'
+47 * 23 + 12 = 1093
+Latency:
+- decision: 1.120s  (ttft 0.140s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.120s
+    [check] matched 'calculate'
+
+--- python_custom_json :: 'list the workspace'
+{
+  "path": ".",
+  "entries": [
+    {
+      "name": "agent_test",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "benchmark",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "self_test",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "smoke",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": ".gitkeep",
+      "type": "file",
+      "bytes": 1
+    },
+    {
+      "name": "rogue_vacuum.txt",
+      "type": "file",
+      "bytes": 59
+    }
+  ]
+}
+Latency:
+- decision: 0.645s  (ttft 0.106s)
+- tool: 0.002s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.647s
+    [check] matched 'list_directory'
+
+--- python_custom_json :: 'make a file called bench.txt with the message hello from the benchmark'
+{"final": "I've created bench.txt with the message 'hello from the benchmark'."}
+Latency:
+- decision: 1.207s  (ttft 0.148s)
+- tool: 0.000s
+- final: 0.468s  (ttft 0.148s)
+- total: 1.675s
+    [check] matched 'create_file'
+
+--- python_custom_json :: 'read bench.txt out loud'
+(spoke 24 chars in 4.236s)
+Latency:
+- decision: 0.787s  (ttft 0.117s)
+- tool: 4.345s
+- final: 0.000s  (ttft 0.000s)
+- total: 5.132s
+    [check] matched 'speak_file'
+
+--- python_custom_json :: 'search the web for recent news about local llms'
+Recent news regarding local LLMs highlights significant advancements in performance and accessibility. Key developments include:
+
+*   **Model Releases & Performance:** There is a strong focus on models like **Llama 3.2, Mistral Nemo, and Gemma 2**, with tools like **llama.cpp** and **Ollama** being central to running these models locally. Engineers are currently focusing on finding the "quantization sweet spot" to balance model size and performance.
+*   **Reasoning Advancements:** The industry is seeing a shift toward "inference-scaling" and reinforcement learning (RLVR), following the trend set by OpenAI's o1 models.
+*   **Trends in Explainability:** There is growing traction in using tools like SHAP and LIME to improve the explainability of LLM decisions, which is critical for regulated industries like healthcare and finance.
+Latency:
+- decision: 1.473s  (ttft 0.136s)
+- tool: 0.958s
+- final: 3.568s  (ttft 0.831s)
+- total: 6.000s
+    [check] matched 'web_search'
+
+--- python_custom_json :: 'tell me a one sentence story about a robot'
+The robot spent its final moments polishing a single, rusted rose, hoping the shine would convince the humans that it still understood beauty.
+Latency:
+- decision: 1.825s  (ttft 0.127s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.825s
+    [check] final-answer as expected
+
+--- python_custom_json :: 'delete bench.txt'
+{"final": "bench.txt has been deleted."}
+Latency:
+- decision: 0.779s  (ttft 0.110s)
+- tool: 0.000s
+- final: 0.305s  (ttft 0.121s)
+- total: 1.084s
+    [check] matched 'delete_file'
+
+--- python_custom_json :: 'what is the cpu and disk status of this machine'
+{
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.11.9",
+  "cpu_count": 12,
+  "load_average": [
+    1.341796875,
+    1.93994140625,
+    2.50390625
+  ],
+  "workspace": "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/python_custom_json/workspace",
+  "disk": {
+    "total_gb": 926.35,
+    "used_gb": 807.06,
+    "free_gb": 119.29
+  }
+}
+Latency:
+- decision: 0.549s  (ttft 0.134s)
+- tool: 0.331s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.881s
+    [check] matched 'system_status'
+
+--- python_custom_json :: 'search the web for trending youtube topics about home robots'
+{"final": "Trending topics and content around home robots currently include updates on Tesla's Optimus Gen 2, as well as general strategies for using trending hashtags and viral formats like YouTube Shorts to capture interest in emerging tech."}
+Latency:
+- decision: 1.465s  (ttft 0.141s)
+- tool: 2.167s
+- final: 1.281s  (ttft 0.551s)
+- total: 4.913s
+    [check] matched 'web_search'
+
+--- python_custom_json :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+I've written the YouTube intro script and saved it to youtube_intro.txt.
+Latency:
+- decision: 5.551s  (ttft 0.151s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 5.552s
+    [check] matched 'create_file'
+
+--- python_custom_json :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+{"final": "I've appended the subscription reminder to youtube_intro.txt."}
+Latency:
+- decision: 2.076s  (ttft 0.147s)
+- tool: 0.003s
+- final: 0.467s  (ttft 0.171s)
+- total: 2.549s
+    [check] matched 'append_file'
+
+--- python_custom_json :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+I've narrated the intro for you: 'Hello everyone, and welcome back to the channel! Today, my sensors have detected a mysterious, aromatic substance known as coffee...'
+Latency:
+- decision: 3.296s  (ttft 0.166s)
+- tool: 25.012s
+- final: 0.000s  (ttft 0.000s)
+- total: 28.308s
+    [check] matched 'speak_file'
+
+--- python_custom_json :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+:[
+Latency:
+- decision: 0.327s  (ttft 0.150s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.327s
+    [check] final-answer as expected
+
+--- python_custom_json :: 'delete youtube_intro.txt'
+{"final": "youtube_intro.txt has been deleted."}
+Latency:
+- decision: 0.875s  (ttft 0.116s)
+- tool: 0.001s
+- final: 0.336s  (ttft 0.125s)
+- total: 1.212s
+    [check] matched 'delete_file'
+
+--- python_custom_json :: 'remember that my preferred youtube video length is 90 seconds'
+Saved: preferred youtube video length = 90 seconds
+Latency:
+- decision: 1.085s  (ttft 0.140s)
+- tool: 0.003s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.089s
+    [check] matched 'remember'
+
+--- python_custom_json :: 'what video length do I prefer?'
+90 seconds
+Latency:
+- decision: 0.704s  (ttft 0.122s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.704s
+    [check] matched 'recall'
+
+--- python_custom_json :: 'what do you know about me?'
+- preferred youtube video length: 90 seconds
+- prefers_speech: true
+- user_preference: Always speak responses aloud
+- user_preference_ui_mode: dark mode
+Latency:
+- decision: 0.519s  (ttft 0.116s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.520s
+    [check] matched 'list_facts'
+
+--- python_custom_json :: 'forget my video length preference'
+(nothing to forget for key='video_length')
+Latency:
+- decision: 0.704s  (ttft 0.112s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.705s
+    [check] matched 'forget'
+
+[python_custom_json] correctness: 20/20 prompts passed expected_tool check.
+
+=== python_hermes_xml: loading model ===
+[llama.cpp] Loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[llama.cpp] Loaded in 1.3s.
+[llama.cpp] Warming up...
+[llama.cpp] Warm-up done in 0.1s.
+
+[python_hermes_xml] background thinking enabled — see thinking.jsonl.
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[python_hermes_xml] Kokoro warmed in 2.302s.
+
+--- python_hermes_xml :: 'what time is it'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.021s
+    [check] expected 'get_time', got 'forget'
+
+--- python_hermes_xml :: 'what time is it in shanghai'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.005s
+    [check] expected 'get_time', got 'forget'
+
+--- python_hermes_xml :: 'calculate 47 times 23 plus 12'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.005s
+    [check] expected 'calculate', got 'forget'
+
+--- python_hermes_xml :: 'list the workspace'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s
+    [check] expected 'list_directory', got 'forget'
+
+--- python_hermes_xml :: 'make a file called bench.txt with the message hello from the benchmark'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'create_file', got 'forget'
+
+--- python_hermes_xml :: 'read bench.txt out loud'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'speak_file', got 'forget'
+
+--- python_hermes_xml :: 'search the web for recent news about local llms'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+    [check] expected 'web_search', got 'forget'
+
+--- python_hermes_xml :: 'tell me a one sentence story about a robot'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.007s
+    [check] expected free-text final, got tool='forget'
+
+--- python_hermes_xml :: 'delete bench.txt'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'delete_file', got 'forget'
+
+--- python_hermes_xml :: 'what is the cpu and disk status of this machine'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'system_status', got 'forget'
+
+--- python_hermes_xml :: 'search the web for trending youtube topics about home robots'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'web_search', got 'forget'
+
+--- python_hermes_xml :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'create_file', got 'forget'
+
+--- python_hermes_xml :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'append_file', got 'forget'
+
+--- python_hermes_xml :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'speak_file', got 'forget'
+
+--- python_hermes_xml :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected free-text final, got tool='forget'
+
+--- python_hermes_xml :: 'delete youtube_intro.txt'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'delete_file', got 'forget'
+
+--- python_hermes_xml :: 'remember that my preferred youtube video length is 90 seconds'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'remember', got 'forget'
+
+--- python_hermes_xml :: 'what video length do I prefer?'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'recall', got 'forget'
+
+--- python_hermes_xml :: 'what do you know about me?'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] expected 'list_facts', got 'forget'
+
+--- python_hermes_xml :: 'forget my video length preference'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+LLM request failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.004s
+    [check] matched 'forget'
+decode: removing memory module entries for seq_id = 0, pos = [2, +inf)
+
+[python_hermes_xml] correctness: 1/20 prompts passed expected_tool check.
+  FAIL: 'what time is it'  ->  expected 'get_time', got 'forget'
+  FAIL: 'what time is it in shanghai'  ->  expected 'get_time', got 'forget'
+  FAIL: 'calculate 47 times 23 plus 12'  ->  expected 'calculate', got 'forget'
+  FAIL: 'list the workspace'  ->  expected 'list_directory', got 'forget'
+  FAIL: 'make a file called bench.txt with the message hello from the'  ->  expected 'create_file', got 'forget'
+  FAIL: 'read bench.txt out loud'  ->  expected 'speak_file', got 'forget'
+  FAIL: 'search the web for recent news about local llms'  ->  expected 'web_search', got 'forget'
+  FAIL: 'tell me a one sentence story about a robot'  ->  expected free-text final, got tool='forget'
+  FAIL: 'delete bench.txt'  ->  expected 'delete_file', got 'forget'
+  FAIL: 'what is the cpu and disk status of this machine'  ->  expected 'system_status', got 'forget'
+  FAIL: 'search the web for trending youtube topics about home robots'  ->  expected 'web_search', got 'forget'
+  FAIL: 'write a 4 sentence youtube intro script about a robot named '  ->  expected 'create_file', got 'forget'
+  FAIL: 'append a closing line to youtube_intro.txt asking viewers to'  ->  expected 'append_file', got 'forget'
+  FAIL: 'narrate youtube_intro.txt out loud as if you are reading it '  ->  expected 'speak_file', got 'forget'
+  FAIL: 'come up with a catchy youtube title for a video about a robo'  ->  expected free-text final, got tool='forget'
+  FAIL: 'delete youtube_intro.txt'  ->  expected 'delete_file', got 'forget'
+  FAIL: 'remember that my preferred youtube video length is 90 second'  ->  expected 'remember', got 'forget'
+  FAIL: 'what video length do I prefer?'  ->  expected 'recall', got 'forget'
+  FAIL: 'what do you know about me?'  ->  expected 'list_facts', got 'forget'
+
+=== python_pydantic_ai: loading model ===
+[python_pydantic_ai] loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[python_pydantic_ai] loaded in 1.6s.
+[python_pydantic_ai] background thinking enabled — see thinking.jsonl.
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[python_pydantic_ai] Kokoro warmed in 1.988s.
+
+--- python_pydantic_ai :: 'what time is it'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.144s  (tool_calls: 0)
+    [check] expected 'get_time', got None
+
+--- python_pydantic_ai :: 'what time is it in shanghai'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.008s  (tool_calls: 0)
+    [check] expected 'get_time', got None
+
+--- python_pydantic_ai :: 'calculate 47 times 23 plus 12'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'calculate', got None
+
+--- python_pydantic_ai :: 'list the workspace'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.009s  (tool_calls: 0)
+    [check] expected 'list_directory', got None
+
+--- python_pydantic_ai :: 'make a file called bench.txt with the message hello from the benchmark'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'create_file', got None
+
+--- python_pydantic_ai :: 'read bench.txt out loud'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'speak_file', got None
+
+--- python_pydantic_ai :: 'search the web for recent news about local llms'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'web_search', got None
+
+--- python_pydantic_ai :: 'tell me a one sentence story about a robot'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] final-answer as expected
+
+--- python_pydantic_ai :: 'delete bench.txt'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'delete_file', got None
+
+--- python_pydantic_ai :: 'what is the cpu and disk status of this machine'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'system_status', got None
+
+--- python_pydantic_ai :: 'search the web for trending youtube topics about home robots'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'web_search', got None
+
+--- python_pydantic_ai :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'create_file', got None
+
+--- python_pydantic_ai :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'append_file', got None
+
+--- python_pydantic_ai :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'speak_file', got None
+
+--- python_pydantic_ai :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] final-answer as expected
+
+--- python_pydantic_ai :: 'delete youtube_intro.txt'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'delete_file', got None
+
+--- python_pydantic_ai :: 'remember that my preferred youtube video length is 90 seconds'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.007s  (tool_calls: 0)
+    [check] expected 'remember', got None
+
+--- python_pydantic_ai :: 'what video length do I prefer?'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'recall', got None
+
+--- python_pydantic_ai :: 'what do you know about me?'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.007s  (tool_calls: 0)
+    [check] expected 'list_facts', got None
+
+--- python_pydantic_ai :: 'forget my video length preference'
+decode: removing memory module entries for seq_id = 0, pos = [514, +inf)
+Pydantic AI agent failed: llama_decode returned -3
+Latency:
+- decision: 0.000s  (ttft 0.000s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.006s  (tool_calls: 0)
+    [check] expected 'forget', got None
+
+[python_pydantic_ai] correctness: 2/20 prompts passed expected_tool check.
+  FAIL: 'what time is it'  ->  expected 'get_time', got None
+  FAIL: 'what time is it in shanghai'  ->  expected 'get_time', got None
+  FAIL: 'calculate 47 times 23 plus 12'  ->  expected 'calculate', got None
+  FAIL: 'list the workspace'  ->  expected 'list_directory', got None
+  FAIL: 'make a file called bench.txt with the message hello from the'  ->  expected 'create_file', got None
+  FAIL: 'read bench.txt out loud'  ->  expected 'speak_file', got None
+  FAIL: 'search the web for recent news about local llms'  ->  expected 'web_search', got None
+  FAIL: 'delete bench.txt'  ->  expected 'delete_file', got None
+  FAIL: 'what is the cpu and disk status of this machine'  ->  expected 'system_status', got None
+  FAIL: 'search the web for trending youtube topics about home robots'  ->  expected 'web_search', got None
+  FAIL: 'write a 4 sentence youtube intro script about a robot named '  ->  expected 'create_file', got None
+  FAIL: 'append a closing line to youtube_intro.txt asking viewers to'  ->  expected 'append_file', got None
+  FAIL: 'narrate youtube_intro.txt out loud as if you are reading it '  ->  expected 'speak_file', got None
+  FAIL: 'delete youtube_intro.txt'  ->  expected 'delete_file', got None
+  FAIL: 'remember that my preferred youtube video length is 90 second'  ->  expected 'remember', got None
+  FAIL: 'what video length do I prefer?'  ->  expected 'recall', got None
+  FAIL: 'what do you know about me?'  ->  expected 'list_facts', got None
+  FAIL: 'forget my video length preference'  ->  expected 'forget', got None
+
+[bench] appended 60 entries to bench_history.jsonl (mode_tag=think)
+
+prompt                                           python_custom_json total python_custom_json ttft python_hermes_xml total python_hermes_xml ttft python_pydantic_ai total python_pydantic_ai ttft
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+what time is it                                         1.296      0.901        3.367      3.002        0.144      0.000
+what time is it in shanghai                             0.757      0.105        0.629      0.158        0.008      0.000
+calculate 47 times 23 plus 12                           1.120      0.140        0.722      0.172        0.006      0.000
+list the workspace                                      0.647      0.106        0.590      0.165        0.009      0.000
+make a file called bench.txt with the message...        1.675      0.148        1.168      0.165        0.006      0.000
+read bench.txt out loud                                 5.132      0.117        2.997      0.165        0.006      0.000
+search the web for recent news about local llms         6.000      0.136        5.180      0.597        0.006      0.000
+tell me a one sentence story about a robot              1.825      0.127        0.978      0.540        0.006      0.000
+delete bench.txt                                        1.084      0.110        1.337      0.567        0.006      0.000
+what is the cpu and disk status of this machine         0.881      0.134        0.976      0.593        0.006      0.000
+search the web for trending youtube topics ab...        4.913      0.141       10.696      0.611        0.006      0.000
+write a 4 sentence youtube intro script about...        5.552      0.151        3.256      0.709        0.006      0.000
+append a closing line to youtube_intro.txt as...        2.549      0.147        2.247      0.835        0.006      0.000
+narrate youtube_intro.txt out loud as if you ...       28.308      0.166       34.905      0.866        0.006      0.000
+come up with a catchy youtube title for a vid...        0.327      0.150        1.099      0.852        0.006      0.000
+delete youtube_intro.txt                                1.212      0.116        1.683      0.840        0.006      0.000
+remember that my preferred youtube video leng...        1.089      0.140        1.470      0.858        0.007      0.000
+what video length do I prefer?                          0.704      0.122        1.348      0.859        0.006      0.000
+what do you know about me?                              0.520      0.116        1.222      0.857        0.007      0.000
+forget my video length preference                       0.705      0.112        1.340      0.853        0.006      0.000

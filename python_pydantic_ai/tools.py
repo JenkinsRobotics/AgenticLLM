@@ -247,10 +247,11 @@ def speak(text: str) -> dict[str, Any]:
     audio = np.concatenate(chunks)
     device = _play_audio_with_live_device(sd, audio)
     if isinstance(device, dict):
+        # Error info dict from playback failure
         return {**device, "text": cleaned}
     return {
         "spoken": True,
-        "text": cleaned,
+        "text": cleaned,                # include text so chat shows what was spoken
         "chars": len(cleaned),
         "seconds": round(time.perf_counter() - started, 3),
         "ssml": has_ssml,
@@ -259,10 +260,18 @@ def speak(text: str) -> dict[str, Any]:
 
 
 def _play_audio_with_live_device(sd, audio):
-    """Play through the current system default output. Re-queries PortAudio
-    each call so users can switch macOS audio output mid-session (AirPods
-    ↔ Speakers) without restarting the chat. On failure, terminates and
-    reinitializes PortAudio, then retries once."""
+    """Play `audio` through the *current* system default output device.
+
+    sounddevice / PortAudio caches the default device at process startup.
+    If the user switches macOS output (AirPods ↔ Speakers) mid-session, the
+    cached device is stale and playback either goes to the disconnected
+    device or fails with `PaErrorCode -9986`. We resolve the live default
+    before each call and, on failure, reinitialize PortAudio so it picks up
+    the new system state.
+
+    Returns the device index on success, or an error-info dict on failure.
+    """
+    # 1. Try to look up the live default output device.
     device: int | None = None
     try:
         info = sd.query_devices(kind="output")
@@ -270,11 +279,14 @@ def _play_audio_with_live_device(sd, audio):
             device = int(info["index"])
     except Exception:
         device = None
+
+    # 2. Attempt playback with that device.
     try:
         sd.play(audio, samplerate=KOKORO_SAMPLE_RATE, device=device)
         sd.wait()
         return device
     except Exception as first_exc:
+        # 3. PortAudio's state may be stale — terminate + reinitialize and retry.
         try:
             sd._terminate()
             sd._initialize()

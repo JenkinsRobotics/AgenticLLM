@@ -38,6 +38,9 @@ SAFE_TOOLS: dict[str, ToolFunc] = {
     "forget": tools.forget,
     "list_facts": tools.list_facts,
     "get_weather": tools.get_weather,
+    "launch_url": tools.launch_url,
+    "open_file": tools.open_file,
+    "open_app": tools.open_app,
 }
 
 TOOL_DEFAULT_MODE: dict[str, str] = {
@@ -57,6 +60,9 @@ TOOL_DEFAULT_MODE: dict[str, str] = {
     "forget": "fast",
     "list_facts": "fast",
     "get_weather": "fast",
+    "launch_url": "natural",
+    "open_file": "natural",
+    "open_app": "natural",
 }
 
 _MCP_DEFAULT_MODE = "natural"

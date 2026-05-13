@@ -187,25 +187,37 @@ def finalize(client, user_text: str, decision: ToolDecision, tool_result: dict[s
     )
 
 
-_CHAIN_INDICATORS = (
-    " and speak", " and read", " and save", " and narrate", " and play",
-    " then speak", " then read", " then save", " then narrate", " then play",
-    " then list", " then write", " then append", " then delete",
-    "narrate ", "read it out", "read this out", "read aloud", "speak it",
-    "speak the", "save it to", "save them to", "save that",
+import re as _re
+
+_CHAIN_VERBS = (
+    "speak", "read", "narrate", "play", "say", "tell",
+    "save", "create", "write", "append", "delete", "list", "open", "launch", "show",
+    "remember", "forget", "recall", "store", "note", "log",
+    "search", "look", "fetch", "find", "check", "browse",
+    "calculate", "compute", "compare",
+)
+
+# Connectors that link two actions in one user turn. "and also" / "then also"
+# are handled by allowing "also" optionally between connector and verb.
+_CHAIN_RE = _re.compile(
+    r"\b(?:and|then|also|plus)\s+(?:also\s+|please\s+|then\s+)*(?:" + "|".join(_CHAIN_VERBS) + r")\b",
+    _re.IGNORECASE,
+)
+
+_STANDALONE_CHAIN_HINTS = (
+    "narrate ", "read it out", "read this out", "read aloud",
+    "speak it", "speak the", "speak that",
+    "save it to", "save them to", "save that",
+    "open it", "launch it",
 )
 
 
 def _wants_chain(user_text: str) -> bool:
-    """Cheap heuristic to detect prompts that explicitly request a chain.
-
-    Single-step prompts ("list the workspace", "calculate X") get the fast
-    legacy path — one decide, one tool, format result, done. Chain prompts
-    ("speak the time in shanghai") get the multi-step loop so the model can
-    call multiple tools in sequence.
-    """
+    """Detect compound prompts that warrant the multi-step loop."""
     lower = " " + user_text.lower() + " "
-    return any(ind in lower for ind in _CHAIN_INDICATORS)
+    if any(hint in lower for hint in _STANDALONE_CHAIN_HINTS):
+        return True
+    return bool(_CHAIN_RE.search(lower))
 
 
 def _decide_with_history(client, base_messages: list[dict[str, str]], extra_messages: list[dict[str, str]]):

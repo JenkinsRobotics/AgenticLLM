@@ -133,6 +133,33 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "launch_url",
+        "description": "Open a URL in the user's default web browser (macOS only). Use this when the user asks to 'open', 'launch', or 'go to' a website.",
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "Full URL starting with http:// or https://"}},
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "open_file",
+        "description": "Open a workspace file in its default macOS application (e.g. Preview, TextEdit).",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Workspace-relative path."}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "open_app",
+        "description": "Launch a macOS application by name (e.g. 'Safari', 'Notes', 'Terminal', 'Mail').",
+        "parameters": {
+            "type": "object",
+            "properties": {"app_name": {"type": "string", "description": "Exact app name as shown in /Applications."}},
+            "required": ["app_name"],
+        },
+    },
+    {
         "name": "remember",
         "description": "Save a fact in persistent unified memory shared across all agent processes. Use proactively when the user shares a preference or fact worth keeping.",
         "parameters": {

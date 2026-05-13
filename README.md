@@ -1,16 +1,16 @@
 # AgenticLLM
 
-A fast local agentic LLM harness on macOS. **Two hand-rolled frameworks** today, both running the same local Gemma 4 26B-A4B model:
+A fast local agentic LLM harness on macOS. **Three frameworks**, all running the same local Gemma 4 26B-A4B model on the same 19+ tools:
 
-- **`python_custom_json/`** — our JSON + GBNF-grammar approach (originally labelled "Pygentic")
-- **`python_hermes_xml/`** — our implementation of the Nous Function-Calling XML format (originally labelled "Hermes")
+| Framework | Approach | Latest TOTAL | Notes |
+|---|---|---:|---|
+| **`python_pydantic_ai/`** ⭐ | Production [Pydantic AI](https://github.com/pydantic/pydantic-ai) library with a custom in-process llama-cpp-python `Model` adapter | **49.05s** | Currently fastest; type-safe tool I/O; automatic retries on bad model output |
+| `python_hermes_xml/` | Our Nous Function-Calling XML format | 58.22s | Hand-rolled, unconstrained decode |
+| `python_custom_json/` | Our JSON + GBNF-grammar | 65.74s | Hand-rolled, strict grammar |
 
-Coming next as comparison points:
+Latest bench totals across the 20 default prompts. See [BENCHMARK.md](BENCHMARK.md) for the live numbers (auto-updated).
 
-- **`pygentic/`** — the **real** `ruvnet/pygentic` PyPI library
-- **`hermes_agent/`** — the **real** `nousresearch/hermes-agent` framework
-
-The point of running all four against the same Gemma model is to identify which approach is best for our robot use case — speed, correctness, capability coverage.
+**Why Pydantic AI is the recommendation:** type-safe tool arguments via Pydantic models (critical for robot/hardware commands — bad coords get rejected before they hit motors), automatic `ModelRetry` when validation fails, active development from the Pydantic team. And after tightening the post-tool summary prompt to "shortest possible reply", it became the fastest of the three on raw throughput too.
 
 The goal is to maximize fast local realtime agentic performance and surface where prompt design + output format actually matter for tool-calling latency.
 
@@ -62,17 +62,19 @@ The safe-tool self-test runs the parser + every tool against canned inputs witho
 ```bash
 .venv/bin/python main.py python_custom_json --self-test
 .venv/bin/python main.py python_hermes_xml   --self-test
+.venv/bin/python main.py python_pydantic_ai  --self-test
 ```
 
-If both print a series of `{"decision": ..., "result": ...}` lines without errors, the install is healthy.
+If they all print a series of tool-result lines without errors, the install is healthy.
 
 ## Running
 
 ### Interactive chat
 
 ```bash
-.venv/bin/python main.py python_custom_json    # Pygentic chat loop
-.venv/bin/python main.py python_hermes_xml      # Hermes chat loop
+.venv/bin/python main.py python_pydantic_ai    # ⭐ recommended (fastest, type-safe)
+.venv/bin/python main.py python_hermes_xml     # hand-rolled XML framework
+.venv/bin/python main.py python_custom_json    # hand-rolled JSON+grammar framework
 ```
 
 You'll see a `You:` prompt. Type anything; `exit`, `quit`, or Ctrl-C to leave. After each reply you'll see a latency report:

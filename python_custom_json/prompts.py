@@ -27,6 +27,9 @@ Tools:
 - speak_file — read a workspace file and speak its contents aloud (also supports SSML in the file). args: {"path": "name.txt"}
 - web_search — DuckDuckGo web search; returns titles/urls/snippets. args: {"query": "search terms"}
 - get_weather — current weather at a location via wttr.in. args: {"location": "Hawaii"}
+- launch_url — open a URL in the user's default web browser (macOS). args: {"url": "https://youtube.com"}
+- open_file — open a workspace file in its default macOS app (Preview, TextEdit, etc.). args: {"path": "name.md"}
+- open_app — launch a macOS application by name. args: {"app_name": "Safari"}
 - remember — save a fact in persistent unified memory. args: {"key": "video_length", "value": "90 seconds"}
 - recall — fetch a previously saved fact. args: {"key": "video_length"}
 - list_facts — list every fact currently in memory. args: {}

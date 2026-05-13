@@ -94,6 +94,14 @@ def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict
         from python_hermes_xml.llm_client import LlamaCppPythonClient
         from python_hermes_xml.main import init_from_env, run_command, shutdown_extensions
         from python_hermes_xml.tools import ensure_workspace
+    elif name == "python_pydantic_ai":
+        from python_pydantic_ai.main import (
+            LlamaCppPythonClient,
+            init_from_env,
+            run_command,
+            shutdown_extensions,
+            ensure_workspace,
+        )
     else:
         raise ValueError(f"unknown framework: {name}")
 
@@ -147,6 +155,16 @@ def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict
             })
     finally:
         shutdown_extensions(wait=True)
+        # Drop the Llama instance and force GC. Without this, residual KV
+        # state from earlier frameworks can poison llama_decode on Apple
+        # Metal — pydantic_ai (the 3rd framework) crashed with
+        # `llama_decode returned -3` until we added this cleanup.
+        try:
+            del client
+        except UnboundLocalError:
+            pass
+        import gc as _gc
+        _gc.collect()
 
     # Per-framework summary
     passed = sum(1 for r in results if r["verdict_status"] == "ok")
@@ -301,7 +319,11 @@ def print_comparison(
 
 
 def write_results_doc() -> int:
-    """Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl."""
+    """Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl AND
+    a shorter root-level BENCHMARK.md for at-a-glance frequent checks.
+
+    Both files are auto-regenerated; do not hand-edit them.
+    """
     from collections import defaultdict
 
     original = [
@@ -404,7 +426,7 @@ def write_results_doc() -> int:
         out.append("Spot-check for regressions: if the latest column drifts >50% from r1 on")
         out.append("the simple-tool prompts (calc, list, delete, cpu/disk), investigate.")
         out.append("")
-        for fw in ("python_custom_json", "python_hermes_xml"):
+        for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
             out.append(f"### {fw.capitalize()} — total (seconds)")
             out.append("")
             header = "| prompt |" + "".join(f" {label} |" for label, _ in key_runs)
@@ -425,7 +447,7 @@ def write_results_doc() -> int:
     for mt, rid in modes:
         out.append(f"- **{mt}** ⟶ run `{rid}`")
     out.append("")
-    for fw in ("python_custom_json", "python_hermes_xml"):
+    for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
         out.append(f"### {fw.capitalize()} — total (seconds)")
         out.append("")
         header = "| prompt |" + "".join(f" {mt} |" for mt, _ in modes)
@@ -450,7 +472,336 @@ def write_results_doc() -> int:
     path = ROOT / "docs" / "BENCH_RESULTS.md"
     path.write_text("\n".join(out), encoding="utf-8")
     print(f"wrote {path.relative_to(ROOT)} ({len(out)} lines, {len(default_runs)} default runs, {len(modes)} modes)")
+
+    # Also write the shorter root-level BENCHMARK.md
+    _write_root_benchmark(runs, latest, original, all_prompts)
     return 0
+
+
+def _expected_tool_map() -> dict[str, str | None]:
+    """Mirror of bench.py's DEFAULT_PROMPTS expected_tool mapping."""
+    return {text: expected for text, expected in DEFAULT_PROMPTS}
+
+
+def _write_root_benchmark(
+    runs: dict,
+    latest: dict[str, str],
+    original_prompts: list[str],
+    all_prompts: list[str],
+) -> None:
+    """Write a compact, at-a-glance BENCHMARK.md at the project root.
+
+    Four sections:
+      1. Best record per framework (lowest latency ever per prompt)
+      2. Latest 3-way comparison
+      3. Per-tool average (latest run)
+      4. Per-framework historical trend (last N runs)
+    """
+    if "default" not in latest:
+        return
+
+    target_frameworks = ("python_custom_json", "python_hermes_xml", "python_pydantic_ai")
+    matching_runs = [
+        rid
+        for (rid, mt) in runs
+        if mt == "default"
+        and all(fw in runs[(rid, mt)] for fw in target_frameworks)
+    ]
+    if matching_runs:
+        run_id = max(matching_runs)
+    else:
+        run_id = latest["default"]
+    frameworks_in_run = [fw for fw in target_frameworks if fw in runs[(run_id, "default")]]
+    if not frameworks_in_run:
+        return
+
+    expected = _expected_tool_map()
+
+    # Index of all default-mode runs for the current framework names.
+    # Skip runs that have ZERO data for a framework so we don't show empty
+    # leading columns in the trend tables.
+    default_runs_per_fw: dict[str, list[tuple[str, dict[str, float]]]] = {fw: [] for fw in target_frameworks}
+    for (rid, mt), frameworks in runs.items():
+        if mt != "default":
+            continue
+        for fw, prompts_dict in frameworks.items():
+            if fw not in target_frameworks:
+                continue
+            totals_map = {p: v[0] for p, v in prompts_dict.items() if v[0] is not None}
+            if not totals_map:
+                continue  # nothing to show for this framework on this run
+            default_runs_per_fw[fw].append((rid, totals_map))
+    for fw in target_frameworks:
+        default_runs_per_fw[fw].sort(key=lambda x: x[0])
+
+    out: list[str] = []
+    out.append("# Benchmark")
+    out.append("")
+    out.append(f"Last run: `{run_id}` · frameworks: {', '.join(frameworks_in_run)}")
+    out.append("")
+    out.append(f"Regenerate with `python bench.py && python bench.py --write-results`.")
+    out.append(f"Detail history: [docs/BENCH_RESULTS.md](docs/BENCH_RESULTS.md).")
+    out.append("")
+
+    # ============================================================================
+    # SECTION 1: Best record per framework (lowest ever seen per prompt)
+    # ============================================================================
+    out.append("## 1. Best record per framework (lowest latency ever)")
+    out.append("")
+    out.append("Each cell = the fastest result that framework has *ever* achieved on this prompt across all default-mode runs in `bench_history.jsonl`. Useful as a personal best target.")
+    out.append("")
+    header = "| prompt | tool |"
+    sep = "|---|---|"
+    for fw in frameworks_in_run:
+        header += f" {fw} best |"
+        sep += "---:|"
+    out.append(header)
+    out.append(sep)
+    best_totals = {fw: 0.0 for fw in frameworks_in_run}
+    best_counts = {fw: 0 for fw in frameworks_in_run}
+    for prompt in all_prompts:
+        tool = expected.get(prompt) or "(free-text)"
+        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
+        for fw in frameworks_in_run:
+            values = [
+                totals_map[prompt]
+                for _, totals_map in default_runs_per_fw[fw]
+                if prompt in totals_map
+            ]
+            if values:
+                best = min(values)
+                best_totals[fw] += best
+                best_counts[fw] += 1
+                row += f" {best:.3f} |"
+            else:
+                row += " – |"
+        out.append(row)
+    sum_row = "| **best-of-bests total** | |"
+    avg_row = "| **best-of-bests avg** | |"
+    for fw in frameworks_in_run:
+        n = best_counts[fw] or 1
+        sum_row += f" **{best_totals[fw]:.2f}** |"
+        avg_row += f" **{best_totals[fw] / n:.3f}** |"
+    out.append(sum_row)
+    out.append(avg_row)
+    out.append("")
+
+    # ============================================================================
+    # SECTION 2: Latest 3-way comparison
+    # ============================================================================
+    out.append("## 2. Latest run — per-prompt totals")
+    out.append("")
+    header = "| prompt | tool |"
+    sep = "|---|---|"
+    for fw in frameworks_in_run:
+        header += f" {fw} |"
+        sep += "---:|"
+    out.append(header)
+    out.append(sep)
+    framework_totals = {fw: 0.0 for fw in frameworks_in_run}
+    framework_counts = {fw: 0 for fw in frameworks_in_run}
+    for prompt in all_prompts:
+        tool = expected.get(prompt) or "(free-text)"
+        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
+        for fw in frameworks_in_run:
+            v = runs[(run_id, "default")][fw].get(prompt, (None,))[0]
+            if v is not None:
+                framework_totals[fw] += v
+                framework_counts[fw] += 1
+                row += f" {v:.3f} |"
+            else:
+                row += " – |"
+        out.append(row)
+    sum_row = "| **TOTAL** | |"
+    avg_row = "| **AVG / prompt** | |"
+    for fw in frameworks_in_run:
+        n = framework_counts[fw] or 1
+        sum_row += f" **{framework_totals[fw]:.2f}** |"
+        avg_row += f" **{framework_totals[fw] / n:.3f}** |"
+    out.append(sum_row)
+    out.append(avg_row)
+    out.append("")
+
+    # ============================================================================
+    # SECTION 3: Per-tool averages on the latest run
+    # ============================================================================
+    out.append("## 3. Per-tool average seconds (latest run)")
+    out.append("")
+    tool_groups: dict[str, list[str]] = {}
+    for prompt in all_prompts:
+        t = expected.get(prompt) or "(free-text)"
+        tool_groups.setdefault(t, []).append(prompt)
+    header = "| tool | n prompts |"
+    sep = "|---|---:|"
+    for fw in frameworks_in_run:
+        header += f" {fw} avg |"
+        sep += "---:|"
+    out.append(header)
+    out.append(sep)
+    tool_keys = sorted(t for t in tool_groups if t != "(free-text)")
+    if "(free-text)" in tool_groups:
+        tool_keys.append("(free-text)")
+    for tool in tool_keys:
+        prompts_in_group = tool_groups[tool]
+        row = f"| `{tool}` | {len(prompts_in_group)} |"
+        for fw in frameworks_in_run:
+            values = []
+            for p in prompts_in_group:
+                v = runs[(run_id, "default")][fw].get(p, (None,))[0]
+                if v is not None:
+                    values.append(v)
+            if values:
+                row += f" {sum(values) / len(values):.3f} |"
+            else:
+                row += " – |"
+        out.append(row)
+    out.append("")
+
+    # ============================================================================
+    # SECTION 4: Per-framework historical trend (last N runs)
+    # ============================================================================
+    history_limit = 5
+    out.append(f"## 4. Per-framework historical trend (last {history_limit} runs)")
+    out.append("")
+    out.append("Each framework's latencies across the most recent default-mode runs. Spot regressions and improvements over time.")
+    out.append("")
+    for fw in frameworks_in_run:
+        fw_runs = default_runs_per_fw[fw][-history_limit:]
+        if not fw_runs:
+            continue
+        out.append(f"### {fw}")
+        out.append("")
+        run_labels = []
+        total_runs_for_fw = len(default_runs_per_fw[fw])
+        first_index_shown = total_runs_for_fw - len(fw_runs) + 1
+        for i, (rid, _) in enumerate(fw_runs):
+            run_labels.append(f"r{first_index_shown + i}")
+        header = "| prompt |"
+        sep = "|---|"
+        for label in run_labels:
+            header += f" {label} |"
+            sep += "---:|"
+        out.append(header)
+        out.append(sep)
+        for prompt in all_prompts:
+            row = f"| {prompt[:46] + ('...' if len(prompt) > 46 else '')} |"
+            for _, totals_map in fw_runs:
+                v = totals_map.get(prompt)
+                row += f" {v:.3f} |" if v is not None else " – |"
+            out.append(row)
+        out.append("")
+        out.append(f"Run IDs: " + ", ".join(f"`{label}`=`{rid}`" for label, (rid, _) in zip(run_labels, fw_runs)))
+        out.append("")
+
+    # ============================================================================
+    # SECTION 5: Headlines
+    # ============================================================================
+    out.append("## Headlines")
+    out.append("")
+    fastest_fw = min(frameworks_in_run, key=lambda f: framework_totals[f])
+    fastest_avg = framework_totals[fastest_fw] / (framework_counts[fastest_fw] or 1)
+    slowest_fw = max(frameworks_in_run, key=lambda f: framework_totals[f])
+    slowest_avg = framework_totals[slowest_fw] / (framework_counts[slowest_fw] or 1)
+    out.append(f"- Latest fastest: **{fastest_fw}** ({framework_totals[fastest_fw]:.2f}s total, {fastest_avg:.3f}s avg).")
+    out.append(f"- Latest slowest: **{slowest_fw}** ({framework_totals[slowest_fw]:.2f}s total, {slowest_avg:.3f}s avg).")
+    out.append(f"- Latest gap: {slowest_avg - fastest_avg:.3f}s/prompt ({(slowest_avg / fastest_avg - 1) * 100:.1f}% slower).")
+    best_avg_per_fw = {
+        fw: best_totals[fw] / (best_counts[fw] or 1) for fw in frameworks_in_run
+    }
+    best_record_holder = min(best_avg_per_fw.keys(), key=lambda f: best_avg_per_fw[f])
+    out.append(f"- Best-record holder (lowest avg across personal bests): **{best_record_holder}** ({best_avg_per_fw[best_record_holder]:.3f}s avg).")
+    out.append("")
+
+    # --- Side-by-side per-prompt totals -------------------------------------------
+    out.append("## Per-prompt total seconds")
+    out.append("")
+    header = "| prompt | tool |"
+    sep = "|---|---|"
+    for fw in frameworks_in_run:
+        header += f" {fw} |"
+        sep += "---:|"
+    out.append(header)
+    out.append(sep)
+    framework_totals = {fw: 0.0 for fw in frameworks_in_run}
+    framework_counts = {fw: 0 for fw in frameworks_in_run}
+    for prompt in all_prompts:
+        tool = expected.get(prompt) or "(free-text)"
+        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
+        for fw in frameworks_in_run:
+            v = runs[(run_id, "default")][fw].get(prompt, (None,))[0]
+            if v is not None:
+                framework_totals[fw] += v
+                framework_counts[fw] += 1
+                row += f" {v:.3f} |"
+            else:
+                row += " – |"
+        out.append(row)
+    # totals
+    sum_row = "| **TOTAL** | |"
+    avg_row = "| **AVG / prompt** | |"
+    for fw in frameworks_in_run:
+        sum_row += f" **{framework_totals[fw]:.2f}** |"
+        n = framework_counts[fw] or 1
+        avg_row += f" **{framework_totals[fw] / n:.3f}** |"
+    out.append(sum_row)
+    out.append(avg_row)
+    out.append("")
+
+    # --- Per-tool average across frameworks ---------------------------------------
+    out.append("## Per-tool average seconds (across the latest run)")
+    out.append("")
+    out.append("Each row groups prompts by the tool they were expected to call. `(free-text)` means no tool — model answered directly.")
+    out.append("")
+    # group prompts by expected tool
+    tool_groups: dict[str, list[str]] = {}
+    for prompt in all_prompts:
+        t = expected.get(prompt) or "(free-text)"
+        tool_groups.setdefault(t, []).append(prompt)
+
+    header = "| tool | n prompts |"
+    sep = "|---|---:|"
+    for fw in frameworks_in_run:
+        header += f" {fw} avg |"
+        sep += "---:|"
+    out.append(header)
+    out.append(sep)
+    # Sort tools for stable output; put free-text at the end
+    tool_keys = sorted(t for t in tool_groups if t != "(free-text)")
+    if "(free-text)" in tool_groups:
+        tool_keys.append("(free-text)")
+    for tool in tool_keys:
+        prompts_in_group = tool_groups[tool]
+        row = f"| `{tool}` | {len(prompts_in_group)} |"
+        for fw in frameworks_in_run:
+            values = []
+            for p in prompts_in_group:
+                v = runs[(run_id, "default")][fw].get(p, (None,))[0]
+                if v is not None:
+                    values.append(v)
+            if values:
+                row += f" {sum(values)/len(values):.3f} |"
+            else:
+                row += " – |"
+        out.append(row)
+    out.append("")
+
+    # --- Summary ----------------------------------------------------------------
+    out.append("## Headlines")
+    out.append("")
+    # Find slowest tool overall
+    fastest_fw = min(frameworks_in_run, key=lambda f: framework_totals[f])
+    fastest_avg = framework_totals[fastest_fw] / (framework_counts[fastest_fw] or 1)
+    slowest_fw = max(frameworks_in_run, key=lambda f: framework_totals[f])
+    slowest_avg = framework_totals[slowest_fw] / (framework_counts[slowest_fw] or 1)
+    out.append(f"- Fastest framework on this run: **{fastest_fw}** ({framework_totals[fastest_fw]:.2f}s total, {fastest_avg:.3f}s avg).")
+    out.append(f"- Slowest: **{slowest_fw}** ({framework_totals[slowest_fw]:.2f}s total, {slowest_avg:.3f}s avg).")
+    out.append(f"- Gap: {slowest_avg - fastest_avg:.3f}s/prompt ({(slowest_avg/fastest_avg - 1) * 100:.1f}% slower).")
+    out.append("")
+    out.append("See `docs/BENCH_RESULTS.md` for the historical view and per-mode breakdown (default / mcp / think / memory / mcp+think+memory).")
+
+    bench_path = ROOT / "BENCHMARK.md"
+    bench_path.write_text("\n".join(out), encoding="utf-8")
+    print(f"wrote {bench_path.relative_to(ROOT)} (root-level table)")
 
 
 def show_compare(mode_tags: list[str]) -> int:
@@ -498,7 +849,7 @@ def show_compare(mode_tags: list[str]) -> int:
     # Header
     cols = ["prompt".ljust(48)]
     for mt in mode_tags:
-        for fw in ("python_custom_json", "python_hermes_xml"):
+        for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
             cols.append(f"{mt[:6]}_{fw[:3]}_t".rjust(12))
     header = " ".join(cols)
     print("\n" + header)
@@ -508,7 +859,7 @@ def show_compare(mode_tags: list[str]) -> int:
         display = prompt[:45] + "..." if len(prompt) > 48 else prompt
         row = [display.ljust(48)]
         for mt in mode_tags:
-            for fw in ("python_custom_json", "python_hermes_xml"):
+            for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
                 total, _ = idx.get((prompt, fw, mt), (None, None))
                 row.append(("%.3f" % total if total is not None else "  -").rjust(12))
         print(" ".join(row))
@@ -563,7 +914,7 @@ def show_history(limit_runs: int) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=["python_custom_json", "python_hermes_xml"], help="Run just one framework.")
+    parser.add_argument("--only", choices=["python_custom_json", "python_hermes_xml", "python_pydantic_ai"], help="Run just one framework.")
     parser.add_argument("--prompts", type=Path, help="Text file with one prompt per line.")
     parser.add_argument("--skip-run", action="store_true", help="Don't run new prompts; only summarize existing logs.")
     parser.add_argument("--history", action="store_true", help="Show recent bench-run history per prompt.")
@@ -597,7 +948,7 @@ def main() -> int:
     elif args.with_mcp:
         prompts = DEFAULT_PROMPTS + MCP_PROMPTS
 
-    chosen = [args.only] if args.only else ["python_custom_json", "python_hermes_xml"]
+    chosen = [args.only] if args.only else ["python_custom_json", "python_hermes_xml", "python_pydantic_ai"]
 
     # Derive a mode tag for the history entries.
     if args.mode_tag:

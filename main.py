@@ -21,9 +21,7 @@ import sys
 FRAMEWORKS = {
     "python_custom_json",
     "python_hermes_xml",
-    # Reserved for future upstream-library wrappers:
-    # "pygentic",       -> the real ruvnet/pygentic
-    # "hermes_agent",   -> the real nousresearch/hermes-agent
+    "python_pydantic_ai",
 }
 
 
@@ -38,6 +36,8 @@ def main() -> int:
 
     if framework == "python_hermes_xml":
         from python_hermes_xml.main import main as agent_main
+    elif framework == "python_pydantic_ai":
+        from python_pydantic_ai.main import main as agent_main
     else:
         from python_custom_json.main import main as agent_main
     return agent_main()

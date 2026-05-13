@@ -243,14 +243,57 @@ def speak(text: str) -> dict[str, Any]:
         return {"spoken": False, "reason": "no audio generated"}
 
     audio = np.concatenate(chunks)
-    sd.play(audio, samplerate=KOKORO_SAMPLE_RATE)
-    sd.wait()
+    device = _play_audio_with_live_device(sd, audio)
+    if isinstance(device, dict):
+        return {**device, "text": cleaned}
     return {
         "spoken": True,
+        "text": cleaned,
         "chars": len(cleaned),
         "seconds": round(time.perf_counter() - started, 3),
         "ssml": has_ssml,
+        "device": device,
     }
+
+
+def _play_audio_with_live_device(sd, audio):
+    """Play through the current system default output. Re-queries PortAudio
+    each call so users can switch macOS audio output mid-session (AirPods
+    ↔ Speakers) without restarting the chat. On failure, terminates and
+    reinitializes PortAudio, then retries once."""
+    device: int | None = None
+    try:
+        info = sd.query_devices(kind="output")
+        if isinstance(info, dict) and "index" in info:
+            device = int(info["index"])
+    except Exception:
+        device = None
+    try:
+        sd.play(audio, samplerate=KOKORO_SAMPLE_RATE, device=device)
+        sd.wait()
+        return device
+    except Exception as first_exc:
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+        try:
+            info = sd.query_devices(kind="output")
+            device = int(info["index"]) if isinstance(info, dict) and "index" in info else None
+        except Exception:
+            device = None
+        try:
+            sd.play(audio, samplerate=KOKORO_SAMPLE_RATE, device=device)
+            sd.wait()
+            return device
+        except Exception as second_exc:
+            return {
+                "spoken": False,
+                "reason": f"playback failed after reinit: {second_exc}",
+                "first_error": str(first_exc),
+                "device": device,
+            }
 
 
 def speak_file(path: str) -> dict[str, Any]:
@@ -295,6 +338,60 @@ def list_facts() -> dict[str, Any]:
     from memory.memory_module import list_facts as _list_facts
 
     return {"facts": _list_facts()}
+
+
+def launch_url(url: str) -> dict[str, Any]:
+    """Open a URL in the default web browser (macOS `open`)."""
+    import subprocess
+
+    clean = url.strip()
+    if not (clean.startswith("http://") or clean.startswith("https://")):
+        return {"error": "URL must start with http:// or https://", "url": clean}
+    if platform.system() != "Darwin":
+        return {"error": f"launch_url only supported on macOS (got {platform.system()})", "url": clean}
+    try:
+        result = subprocess.run(["open", clean], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            return {"error": result.stderr.decode("utf-8", errors="replace")[:200], "url": clean}
+    except Exception as exc:
+        return {"error": str(exc), "url": clean}
+    return {"opened": True, "url": clean}
+
+
+def open_file(path: str) -> dict[str, Any]:
+    """Open a workspace file in its default macOS app."""
+    import subprocess
+
+    target = workspace_path(path)
+    if not target.exists():
+        return {"error": "file not found", "path": path}
+    if platform.system() != "Darwin":
+        return {"error": f"open_file only supported on macOS (got {platform.system()})", "path": str(target)}
+    try:
+        result = subprocess.run(["open", str(target)], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            return {"error": result.stderr.decode("utf-8", errors="replace")[:200], "path": str(target)}
+    except Exception as exc:
+        return {"error": str(exc), "path": str(target)}
+    return {"opened": True, "path": str(target.relative_to(WORKSPACE))}
+
+
+def open_app(app_name: str) -> dict[str, Any]:
+    """Launch a macOS application by name (e.g. 'Safari', 'Notes', 'Terminal')."""
+    import subprocess
+
+    clean = app_name.strip()
+    if not clean:
+        return {"error": "empty app name"}
+    if platform.system() != "Darwin":
+        return {"error": f"open_app only supported on macOS (got {platform.system()})", "app": clean}
+    try:
+        result = subprocess.run(["open", "-a", clean], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            return {"error": result.stderr.decode("utf-8", errors="replace")[:200], "app": clean}
+    except Exception as exc:
+        return {"error": str(exc), "app": clean}
+    return {"opened": True, "app": clean}
 
 
 def get_weather(location: str) -> dict[str, Any]:

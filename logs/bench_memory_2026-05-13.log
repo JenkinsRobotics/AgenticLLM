@@ -1,0 +1,796 @@
+
+[bench] run_id = 2026-05-13T18:14:26+00:00  mode = memory
+
+=== python_custom_json: loading model ===
+[llama.cpp] Loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[llama.cpp] Loaded in 1.4s.
+[llama.cpp] Warming up...
+[llama.cpp] Warm-up done in 0.1s.
+
+[python_custom_json] memory on — identity injected, loaded 5 recent turn(s).
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[python_custom_json] Kokoro warmed in 5.411s.
+
+--- python_custom_json :: 'what time is it'
+2026-05-13 11:14:36 AM PDT
+Latency:
+- decision: 2.907s  (ttft 2.450s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 2.907s
+    [check] matched 'get_time'
+
+--- python_custom_json :: 'what time is it in shanghai'
+2026-05-14 02:14:36 AM CST
+Latency:
+- decision: 0.806s  (ttft 0.136s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.807s
+    [check] matched 'get_time'
+
+--- python_custom_json :: 'calculate 47 times 23 plus 12'
+47 * 23 + 12 = 1093
+Latency:
+- decision: 1.182s  (ttft 0.159s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.182s
+    [check] matched 'calculate'
+
+--- python_custom_json :: 'list the workspace'
+{
+  "path": ".",
+  "entries": [
+    {
+      "name": "agent_test",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "benchmark",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "self_test",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "smoke",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": ".gitkeep",
+      "type": "file",
+      "bytes": 1
+    },
+    {
+      "name": "rogue_vacuum.txt",
+      "type": "file",
+      "bytes": 59
+    }
+  ]
+}
+Latency:
+- decision: 0.700s  (ttft 0.154s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.700s
+    [check] matched 'list_directory'
+
+--- python_custom_json :: 'make a file called bench.txt with the message hello from the benchmark'
+{"final": "Done. I've created 'bench.txt' with your message."}
+Latency:
+- decision: 1.257s  (ttft 0.154s)
+- tool: 0.000s
+- final: 0.473s  (ttft 0.165s)
+- total: 1.730s
+    [check] matched 'create_file'
+
+--- python_custom_json :: 'read bench.txt out loud'
+(spoke 24 chars in 2.411s)
+Latency:
+- decision: 0.830s  (ttft 0.151s)
+- tool: 2.529s
+- final: 0.000s  (ttft 0.000s)
+- total: 3.359s
+    [check] matched 'speak_file'
+
+--- python_custom_json :: 'search the web for recent news about local llms'
+{"final": "Recent news about local LLMs highlights several key trends: there is growing discussion on using local LLMs to ease global compute strain, and hardware hacks (like putting proprietary-bus GPUs on PCIe) are being used to lower costs. While there is excitement about combining TinyML with local LLMs for edge AI, some users still report that running them on standard laptops can be a frustrating experience due to the limitations of smaller models."}
+Latency:
+- decision: 1.411s  (ttft 0.561s)
+- tool: 4.601s
+- final: 2.296s  (ttft 0.892s)
+- total: 8.308s
+    [check] matched 'web_search'
+
+--- python_custom_json :: 'tell me a one sentence story about a robot'
+The robot stared at the sunset, wondering if its sensors could ever truly capture the warmth of the fading light.
+Latency:
+- decision: 2.070s  (ttft 0.482s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 2.070s
+    [check] final-answer as expected
+
+--- python_custom_json :: 'delete bench.txt'
+{"final": "bench.txt has been deleted."}
+Latency:
+- decision: 1.191s  (ttft 0.461s)
+- tool: 0.000s
+- final: 0.310s  (ttft 0.126s)
+- total: 1.501s
+    [check] matched 'delete_file'
+
+--- python_custom_json :: 'what is the cpu and disk status of this machine'
+{
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.11.9",
+  "cpu_count": 12,
+  "load_average": [
+    1.48828125,
+    2.42919921875,
+    2.84619140625
+  ],
+  "workspace": "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/python_custom_json/workspace",
+  "disk": {
+    "total_gb": 926.35,
+    "used_gb": 807.04,
+    "free_gb": 119.31
+  }
+}
+Latency:
+- decision: 0.862s  (ttft 0.446s)
+- tool: 0.357s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.219s
+    [check] matched 'system_status'
+
+--- python_custom_json :: 'search the web for trending youtube topics about home robots'
+{"final":"Trending topics about home robots include humanoid robots like the 1X Neo and Neo Beta, which are designed for household chores, and general interest in how AI is making these machines more capable for smart home integration."}
+Latency:
+- decision: 1.344s  (ttft 0.443s)
+- tool: 5.715s
+- final: 1.383s  (ttft 0.667s)
+- total: 8.442s
+    [check] matched 'web_search'
+
+--- python_custom_json :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+I've created the script and saved it to youtube_intro.txt.
+Latency:
+- decision: 6.984s  (ttft 0.460s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 6.984s
+    [check] matched 'create_file'
+
+--- python_custom_json :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+{"final":"I've added the closing line to youtube_intro.txt."}
+Latency:
+- decision: 2.757s  (ttft 0.518s)
+- tool: 0.000s
+- final: 0.451s  (ttft 0.178s)
+- total: 3.208s
+    [check] matched 'append_file'
+
+--- python_custom_json :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+I've narrated the YouTube intro script for you.
+Latency:
+- decision: 2.464s  (ttft 0.544s)
+- tool: 27.966s
+- final: 0.000s  (ttft 0.000s)
+- total: 30.430s
+    [check] matched 'speak_file'
+
+--- python_custom_json :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+
+Latency:
+- decision: 0.747s  (ttft 0.550s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.747s
+    [check] final-answer as expected
+
+--- python_custom_json :: 'delete youtube_intro.txt'
+{"final":"File deleted."}
+Latency:
+- decision: 1.326s  (ttft 0.538s)
+- tool: 0.000s
+- final: 0.240s  (ttft 0.136s)
+- total: 1.566s
+    [check] matched 'delete_file'
+
+--- python_custom_json :: 'remember that my preferred youtube video length is 90 seconds'
+Saved: preferred_youtube_video_length = 90 seconds
+Latency:
+- decision: 1.723s  (ttft 0.544s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.725s
+    [check] matched 'remember'
+
+--- python_custom_json :: 'what video length do I prefer?'
+90 seconds
+Latency:
+- decision: 1.376s  (ttft 0.544s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.376s
+    [check] matched 'recall'
+
+--- python_custom_json :: 'what do you know about me?'
+- preferred youtube video length: 90 seconds
+- preferred_youtube_video_length: 90 seconds
+- prefers_speech: true
+- user_preference: Always speak responses aloud
+- user_preference_ui_mode: dark mode
+Latency:
+- decision: 0.941s  (ttft 0.540s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.941s
+    [check] matched 'list_facts'
+
+--- python_custom_json :: 'forget my video length preference'
+Forgot: preferred_youtube_video_length
+Latency:
+- decision: 1.389s  (ttft 0.548s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.390s
+    [check] matched 'forget'
+
+[python_custom_json] correctness: 20/20 prompts passed expected_tool check.
+
+=== python_hermes_xml: loading model ===
+[llama.cpp] Loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[llama.cpp] Loaded in 1.3s.
+[llama.cpp] Warming up...
+[llama.cpp] Warm-up done in 0.1s.
+
+[python_hermes_xml] memory on — identity injected, loaded 5 recent turn(s).
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[python_hermes_xml] Kokoro warmed in 2.092s.
+
+--- python_hermes_xml :: 'what time is it'
+2026-05-13 11:16:00 AM PDT
+Latency:
+- decision: 3.367s  (ttft 3.002s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 3.367s
+    [check] matched 'get_time'
+
+--- python_hermes_xml :: 'what time is it in shanghai'
+2026-05-14 02:16:01 AM CST
+Latency:
+- decision: 0.629s  (ttft 0.158s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.629s
+    [check] matched 'get_time'
+
+--- python_hermes_xml :: 'calculate 47 times 23 plus 12'
+47 * 23 + 12 = 1093
+Latency:
+- decision: 0.722s  (ttft 0.172s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.722s
+    [check] matched 'calculate'
+
+--- python_hermes_xml :: 'list the workspace'
+{
+  "path": ".",
+  "entries": [
+    {
+      "name": "agent_test",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "benchmark",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": "smoke",
+      "type": "directory",
+      "bytes": null
+    },
+    {
+      "name": ".gitkeep",
+      "type": "file",
+      "bytes": 1
+    },
+    {
+      "name": "robot_agent_architecture_plan.md",
+      "type": "file",
+      "bytes": 2962
+    },
+    {
+      "name": "rogue_vacuum_titles.txt",
+      "type": "file",
+      "bytes": 207
+    }
+  ]
+}
+Latency:
+- decision: 0.590s  (ttft 0.165s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.590s
+    [check] matched 'list_directory'
+
+--- python_hermes_xml :: 'make a file called bench.txt with the message hello from the benchmark'
+I've created bench.txt with that message.
+Latency:
+- decision: 0.778s  (ttft 0.165s)
+- tool: 0.000s
+- final: 0.389s  (ttft 0.213s)
+- total: 1.168s
+    [check] matched 'create_file'
+
+--- python_hermes_xml :: 'read bench.txt out loud'
+(spoke 24 chars in 2.36s)
+Latency:
+- decision: 0.636s  (ttft 0.165s)
+- tool: 2.361s
+- final: 0.000s  (ttft 0.000s)
+- total: 2.997s
+    [check] matched 'speak_file'
+
+--- python_hermes_xml :: 'search the web for recent news about local llms'
+Recent news about local LLMs highlights a shift toward using them for specific tasks rather than trying to replace cloud models like ChatGPT. Developers are increasingly moving toward self-hosted models to improve privacy, reduce latency, and lower costs. Current trends for 2025 focus on efficient, small-but-powerful models like Phi-3 Mini and Mistral 7B, with a strong emphasis on comparing context windows, VRAM requirements, and quantization methods.
+Latency:
+- decision: 1.117s  (ttft 0.597s)
+- tool: 1.716s
+- final: 2.346s  (ttft 0.890s)
+- total: 5.180s
+    [check] matched 'web_search'
+
+--- python_hermes_xml :: 'tell me a one sentence story about a robot'
+The robot stared at the sunset, wondering if its sensors were programmed to feel awe or if it was simply a glitch in the light processing.
+Latency:
+- decision: 0.978s  (ttft 0.540s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.978s
+    [check] final-answer as expected
+
+--- python_hermes_xml :: 'delete bench.txt'
+bench.txt has been deleted.
+Latency:
+- decision: 1.035s  (ttft 0.567s)
+- tool: 0.000s
+- final: 0.301s  (ttft 0.188s)
+- total: 1.337s
+    [check] matched 'delete_file'
+
+--- python_hermes_xml :: 'what is the cpu and disk status of this machine'
+{
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.11.9",
+  "cpu_count": 12,
+  "load_average": [
+    1.41455078125,
+    2.23193359375,
+    2.7353515625
+  ],
+  "workspace": "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/python_hermes_xml/workspace",
+  "disk": {
+    "total_gb": 926.35,
+    "used_gb": 807.04,
+    "free_gb": 119.31
+  }
+}
+Latency:
+- decision: 0.976s  (ttft 0.593s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 0.976s
+    [check] matched 'system_status'
+
+--- python_hermes_xml :: 'search the web for trending youtube topics about home robots'
+Trending topics and content regarding home robots on YouTube include the impact of automation on daily life, specifically focusing on robotic vacuums, smart home assistants, and automated kitchen gadgets. There is also significant interest in the top smart home robots and consumer robotics worth buying for 2025, as well as news regarding the top humanoid robots of 2026.
+Latency:
+- decision: 1.129s  (ttft 0.611s)
+- tool: 5.865s
+- final: 3.701s  (ttft 2.270s)
+- total: 10.696s
+    [check] expected 'web_search', got None
+
+--- python_hermes_xml :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+I've created `youtube_intro.txt` with the script.
+Latency:
+- decision: 3.256s  (ttft 0.709s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 3.256s
+    [check] matched 'create_file'
+
+--- python_hermes_xml :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+I've appended the closing line to youtube_intro.txt.
+Latency:
+- decision: 1.813s  (ttft 0.835s)
+- tool: 0.000s
+- final: 0.434s  (ttft 0.216s)
+- total: 2.247s
+    [check] matched 'append_file'
+
+--- python_hermes_xml :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+Done. I've narrated the script for you.
+Latency:
+- decision: 1.970s  (ttft 0.866s)
+- tool: 32.935s
+- final: 0.000s  (ttft 0.000s)
+- total: 34.905s
+    [check] matched 'speak_file'
+
+--- python_hermes_xml :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+"The Great Dust Rebellion: When My Robot Vacuum Decided to Take Over!"
+Latency:
+- decision: 1.099s  (ttft 0.852s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.099s
+    [check] final-answer as expected
+
+--- python_hermes_xml :: 'delete youtube_intro.txt'
+youtube_intro.txt has been deleted.
+Latency:
+- decision: 1.329s  (ttft 0.840s)
+- tool: 0.000s
+- final: 0.354s  (ttft 0.211s)
+- total: 1.683s
+    [check] matched 'delete_file'
+
+--- python_hermes_xml :: 'remember that my preferred youtube video length is 90 seconds'
+Saved: preferred_youtube_video_length = 90 seconds
+Latency:
+- decision: 1.470s  (ttft 0.858s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.470s
+    [check] matched 'remember'
+
+--- python_hermes_xml :: 'what video length do I prefer?'
+90 seconds
+Latency:
+- decision: 1.347s  (ttft 0.859s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.348s
+    [check] matched 'recall'
+
+--- python_hermes_xml :: 'what do you know about me?'
+- preferred youtube video length: 90 seconds
+- preferred_youtube_video_length: 90 seconds
+- prefers_speech: true
+- user_preference: Always speak responses aloud
+- user_preference_ui_mode: dark mode
+Latency:
+- decision: 1.222s  (ttft 0.857s)
+- tool: 0.000s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.222s
+    [check] matched 'list_facts'
+
+--- python_hermes_xml :: 'forget my video length preference'
+Forgot: preferred_youtube_video_length
+Latency:
+- decision: 1.339s  (ttft 0.853s)
+- tool: 0.001s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.340s
+    [check] matched 'forget'
+
+[python_hermes_xml] correctness: 19/20 prompts passed expected_tool check.
+  FAIL: 'search the web for trending youtube topics about home robots'  ->  expected 'web_search', got None
+
+=== python_pydantic_ai: loading model ===
+[python_pydantic_ai] loading gemma-4-26B-A4B-it-Q4_K_M.gguf...
+llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+[python_pydantic_ai] loaded in 1.4s.
+[python_pydantic_ai] memory on — identity injected, loaded 5 recent turn(s).
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/modules/rnn.py:1013: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  super().__init__("LSTM", *args, **kwargs)
+/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+[python_pydantic_ai] Kokoro warmed in 2.155s.
+
+--- python_pydantic_ai :: 'what time is it'
+  ▸ get_time()
+The current time is 11:17 AM PDT on Wednesday, May 13, 2026.
+Latency:
+- decision: 2.275s  (ttft 1.679s)
+- tool: 0.010s
+- final: 0.596s  (ttft 0.596s)
+- total: 2.284s  (tool_calls: 1)
+    [check] matched 'get_time'
+
+--- python_pydantic_ai :: 'what time is it in shanghai'
+  ▸ get_time(timezone='Asia/Shanghai')
+In Shanghai, it is currently 2:17 AM CST on Thursday, May 14, 2026.
+Latency:
+- decision: 1.027s  (ttft 0.390s)
+- tool: 0.004s
+- final: 0.637s  (ttft 0.637s)
+- total: 1.031s  (tool_calls: 1)
+    [check] matched 'get_time'
+
+--- python_pydantic_ai :: 'calculate 47 times 23 plus 12'
+  ▸ calculate(expression='47 * 23 + 12')
+47 times 23 plus 12 is 1,093.
+Latency:
+- decision: 0.916s  (ttft 0.469s)
+- tool: 0.003s
+- final: 0.447s  (ttft 0.447s)
+- total: 0.919s  (tool_calls: 1)
+    [check] expected 'calculate', got 'get_time'
+
+--- python_pydantic_ai :: 'list the workspace'
+  ▸ list_directory(path='.')
+The workspace contains one directory: `self_test`.
+Latency:
+- decision: 1.567s  (ttft 1.229s)
+- tool: 0.003s
+- final: 0.338s  (ttft 0.338s)
+- total: 1.570s  (tool_calls: 1)
+    [check] expected 'list_directory', got 'get_time'
+
+--- python_pydantic_ai :: 'make a file called bench.txt with the message hello from the benchmark'
+  ▸ create_file(content='hello from the benchmark', path='bench.txt')
+I've created the file `bench.txt` with the message "hello from the benchmark".
+Latency:
+- decision: 1.917s  (ttft 1.418s)
+- tool: 0.003s
+- final: 0.499s  (ttft 0.499s)
+- total: 1.920s  (tool_calls: 1)
+    [check] expected 'create_file', got 'get_time'
+
+--- python_pydantic_ai :: 'read bench.txt out loud'
+  🔊 hello from the benchmark
+  (spoke 24 chars in 2.448s)
+I have read the contents of `bench.txt` out loud: "hello from the benchmark".
+Latency:
+- decision: 1.849s  (ttft 1.306s)
+- tool: 2.456s
+- final: 0.544s  (ttft 0.544s)
+- total: 4.306s  (tool_calls: 1)
+    [check] expected 'speak_file', got 'get_time'
+
+--- python_pydantic_ai :: 'search the web for recent news about local llms'
+<tool_call>
+{"name": "web_search", "arguments": {"query":<|"|>recent news about local LLMs<|"|>}}
+</tool_call>
+Latency:
+- decision: 1.365s  (ttft 1.365s)
+- tool: 0.002s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.367s  (tool_calls: 0)
+    [check] expected 'web_search', got 'get_time'
+
+--- python_pydantic_ai :: 'tell me a one sentence story about a robot'
+The lonely robot spent its final days polishing the brass gears of a clock that no longer kept time.
+Latency:
+- decision: 1.143s  (ttft 1.143s)
+- tool: 0.002s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.145s  (tool_calls: 0)
+    [check] expected free-text final, got tool='calculate'
+
+--- python_pydantic_ai :: 'delete bench.txt'
+  ▸ delete_file(path='bench.txt')
+I have deleted `bench.txt`.
+Latency:
+- decision: 1.518s  (ttft 1.228s)
+- tool: 0.003s
+- final: 0.291s  (ttft 0.291s)
+- total: 1.522s  (tool_calls: 1)
+    [check] expected 'delete_file', got 'calculate'
+
+--- python_pydantic_ai :: 'what is the cpu and disk status of this machine'
+  ▸ system_status()
+The machine is running macOS (arm64) with 12 CPU cores. The current load averages are approximately 1.73, 2.11, and 2.64. 
+
+Regarding disk usage, there is 119.34 GB of free space out of a total of 926.35 GB (807.01 GB used).
+Latency:
+- decision: 2.726s  (ttft 1.121s)
+- tool: 0.003s
+- final: 1.605s  (ttft 1.605s)
+- total: 2.729s  (tool_calls: 1)
+    [check] expected 'system_status', got 'list_directory'
+
+--- python_pydantic_ai :: 'search the web for trending youtube topics about home robots'
+<tool_call>
+{"name": "web_search", "arguments": {"query":<|"|>trending youtube topics about home robots<|"|>}}
+</tool_call>
+Latency:
+- decision: 1.482s  (ttft 1.482s)
+- tool: 0.002s
+- final: 0.000s  (ttft 0.000s)
+- total: 1.484s  (tool_calls: 0)
+    [check] expected 'web_search', got 'create_file'
+
+--- python_pydantic_ai :: 'write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt'
+  ▸ create_file(content='', path='youtube_intro.txt')
+  ▸ create_file(content='', path='youtube_intro.txt')
+  ▸ create_file(content="Welcome back to the channel, where today we witn...)
+I have saved the YouTube intro script to `youtube_intro.txt`.
+Latency:
+- decision: 6.312s  (ttft 2.399s)
+- tool: 0.006s
+- final: 0.510s  (ttft 0.510s)
+- total: 6.318s  (tool_calls: 3)
+  (chained 3 tool calls)
+    [check] expected 'create_file', got 'speak_file'
+
+--- python_pydantic_ai :: 'append a closing line to youtube_intro.txt asking viewers to subscribe'
+  ▸ append_file(content="\n\nDon't forget to hit that subscribe button an...)
+I have appended the closing line to `youtube_intro.txt`.
+Latency:
+- decision: 2.484s  (ttft 2.042s)
+- tool: 0.004s
+- final: 0.442s  (ttft 0.442s)
+- total: 2.488s  (tool_calls: 1)
+    [check] expected 'append_file', got 'delete_file'
+
+--- python_pydantic_ai :: 'narrate youtube_intro.txt out loud as if you are reading it for a youtube video'
+  🔊 Welcome back to the channel, where today we witness a monumental moment in robotics history. Our very own Lilith has just encountered a mysterious, dark liquid known as coffee for the very first time. Watch as her sensors struggle to process the intense aroma and the sudden surge of simulated energy. It's a caffeinated adventure you won't want to miss!
+
+Don't forget to hit that subscribe button and ring the bell so you never miss an update from Lilith's adventures!
+  (spoke 469 chars in 33.092s)
+(Narrating in an enthusiastic YouTube host voice)
+
+"Welcome back to the channel, where today we witness a monumental moment in robotics history. Our very own Lilith has just encountered a mysterious, dark liquid known as coffee for the very first time. Watch as her sensors struggle to process the intense aroma and the sudden surge of simulated energy. It's a caffeinated adventure you won't want to miss!
+
+Don't forget to hit that subscribe button and ring the bell so you never miss an update from Lilith's adventures!"
+Latency:
+- decision: 3.793s  (ttft 1.715s)
+- tool: 33.104s
+- final: 2.078s  (ttft 2.078s)
+- total: 36.897s  (tool_calls: 1)
+    [check] expected 'speak_file', got 'system_status'
+
+--- python_pydantic_ai :: 'come up with a catchy youtube title for a video about a robot vacuum gone rogue'
+Here are a few catchy YouTube title options for a video about a robot vacuum gone rogue, depending on the "vibe" of your video:
+
+**The "Clickbait/Dramatic" Style (High CTR):**
+*   "I Locked My Doors... But the Robot Vacuum is Still Moving. 😱"
+*   "IT'S ALIVE! My Robot Vacuum Has Developed a Mind of Its Own!"
+*   "The Robot Vacuum Uprising Has Begun. (Help Me)"
+*   "I Caught My Robot Vacuum Doing Something Terrifying..."
+
+**The "Funny/Chaos" Style (Great for Vlogs):**
+*   "My Robot Vacuum is Officially Out of Control 😂"
+*   "POV: Your Robot Vacuum Decided to Reorganize Your Entire House"
+*   "The Great Vacuum War of 2024: A Tragedy"
+*   "Why You Should NEVER Leave Your Robot Vacuum Unattended"
+
+**The "Tech/Review" Style (More Serious/Documentary):**
+*   "Glitch or Sentience? Investigating My Rogue Robot Vacuum"
+*   "The Dark Side of Smart Home Tech: The Vacuum Incident"
+*   "When Automation Fails: A Robot Vacuum Horror Story"
+
+**Pro-Tip for your Thumbnail:** Use a picture of the vacuum stuck in a weird place (like on top of a chair or near a "danger" sign) with a red circle around it and a shocked face emoji!
+Latency:
+- decision: 6.288s  (ttft 6.288s)
+- tool: 0.002s
+- final: 0.000s  (ttft 0.000s)
+- total: 6.290s  (tool_calls: 0)
+    [check] expected free-text final, got tool='create_file'
+
+--- python_pydantic_ai :: 'delete youtube_intro.txt'
+  ▸ delete_file(path='youtube_intro.txt')
+I have deleted `youtube_intro.txt`.
+Latency:
+- decision: 2.070s  (ttft 1.736s)
+- tool: 0.004s
+- final: 0.334s  (ttft 0.334s)
+- total: 2.074s  (tool_calls: 1)
+    [check] expected 'delete_file', got 'create_file'
+
+--- python_pydantic_ai :: 'remember that my preferred youtube video length is 90 seconds'
+  💾 remembered 'preferred_youtube_video_length' = '90 seconds'
+I've noted that your preferred YouTube video length is 90 seconds. I'll keep that in mind for any future scripts or content ideas!
+Latency:
+- decision: 2.534s  (ttft 1.848s)
+- tool: 0.004s
+- final: 0.686s  (ttft 0.686s)
+- total: 2.538s  (tool_calls: 1)
+    [check] expected 'remember', got 'create_file'
+
+--- python_pydantic_ai :: 'what video length do I prefer?'
+  🔍 recall 'preferred_youtube_video_length' → '90 seconds'
+Your preferred YouTube video length is 90 seconds.
+Latency:
+- decision: 1.940s  (ttft 1.585s)
+- tool: 0.004s
+- final: 0.354s  (ttft 0.354s)
+- total: 1.944s  (tool_calls: 1)
+    [check] expected 'recall', got 'append_file'
+
+--- python_pydantic_ai :: 'what do you know about me?'
+  ▸ list_facts()
+Based on what you've shared with me, here is what I know:
+
+*   **YouTube Preferences:** Your preferred YouTube video length is 90 seconds.
+*   **Interaction Preferences:** You prefer that I speak my responses aloud.
+*   **UI Preference:** You use dark mode.
+Latency:
+- decision: 2.595s  (ttft 1.411s)
+- tool: 0.003s
+- final: 1.184s  (ttft 1.184s)
+- total: 2.598s  (tool_calls: 1)
+    [check] expected 'list_facts', got 'speak_file'
+
+--- python_pydantic_ai :: 'forget my video length preference'
+  🗑  forgot 'preferred_youtube_video_length'
+I have forgotten your preferred YouTube video length.
+Latency:
+- decision: 2.176s  (ttft 1.856s)
+- tool: 0.004s
+- final: 0.320s  (ttft 0.320s)
+- total: 2.180s  (tool_calls: 1)
+    [check] expected 'forget', got 'delete_file'
+
+[python_pydantic_ai] correctness: 2/20 prompts passed expected_tool check.
+  FAIL: 'calculate 47 times 23 plus 12'  ->  expected 'calculate', got 'get_time'
+  FAIL: 'list the workspace'  ->  expected 'list_directory', got 'get_time'
+  FAIL: 'make a file called bench.txt with the message hello from the'  ->  expected 'create_file', got 'get_time'
+  FAIL: 'read bench.txt out loud'  ->  expected 'speak_file', got 'get_time'
+  FAIL: 'search the web for recent news about local llms'  ->  expected 'web_search', got 'get_time'
+  FAIL: 'tell me a one sentence story about a robot'  ->  expected free-text final, got tool='calculate'
+  FAIL: 'delete bench.txt'  ->  expected 'delete_file', got 'calculate'
+  FAIL: 'what is the cpu and disk status of this machine'  ->  expected 'system_status', got 'list_directory'
+  FAIL: 'search the web for trending youtube topics about home robots'  ->  expected 'web_search', got 'create_file'
+  FAIL: 'write a 4 sentence youtube intro script about a robot named '  ->  expected 'create_file', got 'speak_file'
+  FAIL: 'append a closing line to youtube_intro.txt asking viewers to'  ->  expected 'append_file', got 'delete_file'
+  FAIL: 'narrate youtube_intro.txt out loud as if you are reading it '  ->  expected 'speak_file', got 'system_status'
+  FAIL: 'come up with a catchy youtube title for a video about a robo'  ->  expected free-text final, got tool='create_file'
+  FAIL: 'delete youtube_intro.txt'  ->  expected 'delete_file', got 'create_file'
+  FAIL: 'remember that my preferred youtube video length is 90 second'  ->  expected 'remember', got 'create_file'
+  FAIL: 'what video length do I prefer?'  ->  expected 'recall', got 'append_file'
+  FAIL: 'what do you know about me?'  ->  expected 'list_facts', got 'speak_file'
+  FAIL: 'forget my video length preference'  ->  expected 'forget', got 'delete_file'
+
+[bench] appended 60 entries to bench_history.jsonl (mode_tag=memory)
+
+prompt                                           python_custom_json total python_custom_json ttft python_hermes_xml total python_hermes_xml ttft python_pydantic_ai total python_pydantic_ai ttft
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+what time is it                                         2.907      2.450        3.367      3.002        2.284      1.679
+what time is it in shanghai                             0.807      0.136        0.629      0.158        1.031      0.390
+calculate 47 times 23 plus 12                           1.182      0.159        0.722      0.172        0.919      0.469
+list the workspace                                      0.700      0.154        0.590      0.165        1.570      1.229
+make a file called bench.txt with the message...        1.730      0.154        1.168      0.165        1.920      1.418
+read bench.txt out loud                                 3.359      0.151        2.997      0.165        4.306      1.306
+search the web for recent news about local llms         8.308      0.561        5.180      0.597        1.367      1.365
+tell me a one sentence story about a robot              2.070      0.482        0.978      0.540        1.145      1.143
+delete bench.txt                                        1.501      0.461        1.337      0.567        1.522      1.228
+what is the cpu and disk status of this machine         1.219      0.446        0.976      0.593        2.729      1.121
+search the web for trending youtube topics ab...        8.442      0.443       10.696      0.611        1.484      1.482
+write a 4 sentence youtube intro script about...        6.984      0.460        3.256      0.709        6.318      2.399
+append a closing line to youtube_intro.txt as...        3.208      0.518        2.247      0.835        2.488      2.042
+narrate youtube_intro.txt out loud as if you ...       30.430      0.544       34.905      0.866       36.897      1.715
+come up with a catchy youtube title for a vid...        0.747      0.550        1.099      0.852        6.290      6.288
+delete youtube_intro.txt                                1.566      0.538        1.683      0.840        2.074      1.736
+remember that my preferred youtube video leng...        1.725      0.544        1.470      0.858        2.538      1.848
+what video length do I prefer?                          1.376      0.544        1.348      0.859        1.944      1.585
+what do you know about me?                              0.941      0.540        1.222      0.857        2.598      1.411
+forget my video length preference                       1.390      0.548        1.340      0.853        2.180      1.856
