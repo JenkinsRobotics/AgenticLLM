@@ -297,6 +297,35 @@ def list_facts() -> dict[str, Any]:
     return {"facts": _list_facts()}
 
 
+def get_weather(location: str) -> dict[str, Any]:
+    """Look up current weather at a location via wttr.in (no API key)."""
+    clean = location.strip()
+    if not clean:
+        return {"error": "empty location"}
+    try:
+        import certifi
+        import requests
+    except ImportError as exc:
+        return {"error": f"requests/certifi missing: {exc}", "location": clean}
+    fmt = "%C+%t+(feels+%f),+humidity+%h,+wind+%w"
+    url = f"https://wttr.in/{clean}"
+    try:
+        response = requests.get(
+            url,
+            params={"format": fmt},
+            headers={"User-Agent": "AgenticLLM/0.1 (curl)"},
+            timeout=10,
+            verify=certifi.where(),
+        )
+        text = response.text.strip()
+    except Exception as exc:
+        return {"error": str(exc), "location": clean}
+    if not text or text.lower().startswith("unknown location") or "<html" in text.lower():
+        return {"error": "unknown location", "location": clean}
+    pretty = re.sub(r"\s+", " ", text.replace("+", " ")).strip()
+    return {"location": clean, "weather": pretty}
+
+
 def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
     """DuckDuckGo HTML search. No API key required."""
     try:

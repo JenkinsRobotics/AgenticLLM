@@ -33,6 +33,13 @@ Each run:
 Two prompts in the default set play audio out loud (~28 s each). Skip them
 with a custom prompt file if you don't want TTS during timing.
 
+## Tracked results table
+
+Current numbers (latest run per mode, plus historical consistency view) live in
+[BENCH_RESULTS.md](BENCH_RESULTS.md). After running a new bench, regenerate that
+file by re-running the small script embedded at the top of this doc's history
+(or just open `bench_history.jsonl` directly and read the latest entries).
+
 ## Reading the history
 
 ```bash

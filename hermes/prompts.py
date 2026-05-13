@@ -124,6 +124,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_weather",
+        "description": "Current weather at a named location via wttr.in. Returns conditions, temperature, humidity, and wind.",
+        "parameters": {
+            "type": "object",
+            "properties": {"location": {"type": "string", "description": "City, region, or country name (e.g. 'Hawaii', 'Los Angeles', 'Shanghai')."}},
+            "required": ["location"],
+        },
+    },
+    {
         "name": "remember",
         "description": "Save a fact in persistent unified memory shared across all agent processes. Use proactively when the user shares a preference or fact worth keeping.",
         "parameters": {
@@ -186,6 +195,10 @@ When a tool is needed, respond ONLY with a tool call in this exact format:
 </tool_call>
 
 If no tool is needed, answer the user directly in plain text (no tags).
+
+If the user requests something none of the listed tools can do, say so honestly in plain text — e.g. "I don't have a tool for X. I can <list 1-2 closest capabilities>." Never invent a tool error or pretend a tool ran when it didn't.
+
+After you receive a <tool_response>: if the tool result already answers the user's original question, write a short plain-text final answer to the user. Only call another tool when the user EXPLICITLY asked for a follow-up action (e.g. "and speak it", "then save it to a file", "narrate that"). Do NOT explore the workspace, drill into subdirectories, or open extra files the user didn't ask about. Default to finalizing.
 """
 
 

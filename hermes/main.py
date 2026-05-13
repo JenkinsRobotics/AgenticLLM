@@ -214,6 +214,25 @@ def run_command(client, user_text: str, default_mode: str) -> None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
 
 
+_CHAIN_INDICATORS = (
+    " and speak", " and read", " and save", " and narrate", " and play",
+    " then speak", " then read", " then save", " then narrate", " then play",
+    " then list", " then write", " then append", " then delete",
+    "narrate ", "read it out", "read this out", "read aloud", "speak it",
+    "speak the", "save it to", "save them to", "save that",
+)
+
+
+def _wants_chain(user_text: str) -> bool:
+    """Cheap heuristic to detect prompts that explicitly request a chain.
+
+    Single-step prompts get the fast legacy path. Chain prompts get the
+    multi-step loop so the model can call multiple tools in sequence.
+    """
+    lower = " " + user_text.lower() + " "
+    return any(ind in lower for ind in _CHAIN_INDICATORS)
+
+
 def _decide_with_history(client, base_messages: list[dict[str, str]], extra_messages: list[dict[str, str]]):
     """Decide() variant that takes already-built messages so we can append
     prior steps' tool-call/tool-response pairs without rebuilding."""
@@ -232,7 +251,8 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
     same-tool-twice loop detection.
     """
     total_started = time.perf_counter()
-    max_steps = max(1, int(_pipeline.get("max_steps", 4) or 4))
+    configured_max = max(1, int(_pipeline.get("max_steps", 4) or 4))
+    max_steps = configured_max if _wants_chain(user_text) else 1
 
     base_messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
     if _session_history:
@@ -574,6 +594,12 @@ def main() -> int:
         except Exception as exc:
             print(f"Failed to load local llama.cpp model: {exc}")
             return 2
+
+    # Interactive chat defaults to memory ON for conversation continuity.
+    is_interactive = not " ".join(args.prompt).strip()
+    if is_interactive and not args.with_memory:
+        args.with_memory = True
+        print("[hermes] interactive chat — memory auto-enabled (identity + session history).", flush=True)
 
     init_extensions(args, client)
 

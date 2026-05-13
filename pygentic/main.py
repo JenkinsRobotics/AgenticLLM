@@ -187,6 +187,27 @@ def finalize(client, user_text: str, decision: ToolDecision, tool_result: dict[s
     )
 
 
+_CHAIN_INDICATORS = (
+    " and speak", " and read", " and save", " and narrate", " and play",
+    " then speak", " then read", " then save", " then narrate", " then play",
+    " then list", " then write", " then append", " then delete",
+    "narrate ", "read it out", "read this out", "read aloud", "speak it",
+    "speak the", "save it to", "save them to", "save that",
+)
+
+
+def _wants_chain(user_text: str) -> bool:
+    """Cheap heuristic to detect prompts that explicitly request a chain.
+
+    Single-step prompts ("list the workspace", "calculate X") get the fast
+    legacy path — one decide, one tool, format result, done. Chain prompts
+    ("speak the time in shanghai") get the multi-step loop so the model can
+    call multiple tools in sequence.
+    """
+    lower = " " + user_text.lower() + " "
+    return any(ind in lower for ind in _CHAIN_INDICATORS)
+
+
 def _decide_with_history(client, base_messages: list[dict[str, str]], extra_messages: list[dict[str, str]]):
     """Decide() variant that takes already-built messages so we can append
     prior steps' (assistant_decision, tool_result) pairs without rebuilding."""
@@ -206,7 +227,10 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
     reached. Single-step behavior is preserved when max_steps == 1.
     """
     total_started = time.perf_counter()
-    max_steps = max(1, int(_pipeline.get("max_steps", 4) or 4))
+    configured_max = max(1, int(_pipeline.get("max_steps", 4) or 4))
+    # Single-step by default — only enable the chain loop when the prompt
+    # explicitly indicates the user wants multiple tools in sequence.
+    max_steps = configured_max if _wants_chain(user_text) else 1
 
     base_messages: list[dict[str, str]] = [{"role": "system", "content": _pipeline["system_prompt"]}]
     if _session_history:
@@ -559,6 +583,14 @@ def main() -> int:
         except Exception as exc:
             print(f"Failed to load local llama.cpp model: {exc}")
             return 2
+
+    # Interactive chat (no one-shot prompt) defaults to memory ON so the
+    # conversation feels continuous. Pass --with-memory explicitly to also
+    # enable it on one-shot calls.
+    is_interactive = not " ".join(args.prompt).strip()
+    if is_interactive and not args.with_memory:
+        args.with_memory = True
+        print("[pygentic] interactive chat — memory auto-enabled (identity + session history).", flush=True)
 
     init_extensions(args, client)
 

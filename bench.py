@@ -300,6 +300,159 @@ def print_comparison(
         print(" ".join(parts))
 
 
+def write_results_doc() -> int:
+    """Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl."""
+    from collections import defaultdict
+
+    original = [
+        "what time is it",
+        "calculate 47 times 23 plus 12",
+        "list the workspace",
+        "make a file called bench.txt with the message hello from the benchmark",
+        "read bench.txt out loud",
+        "search the web for recent news about local llms",
+        "tell me a one sentence story about a robot",
+        "delete bench.txt",
+        "what is the cpu and disk status of this machine",
+    ]
+    all_prompts = original + [
+        "what time is it in shanghai",
+        "search the web for trending youtube topics about home robots",
+        "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "delete youtube_intro.txt",
+        "remember that my preferred youtube video length is 90 seconds",
+        "what video length do I prefer?",
+        "what do you know about me?",
+        "forget my video length preference",
+    ]
+
+    if not HISTORY_PATH.exists():
+        print("bench_history.jsonl not found — run `python bench.py` first.")
+        return 1
+
+    runs: dict[tuple[str, str], dict[str, dict[str, tuple[float | None, float | None]]]] = defaultdict(lambda: defaultdict(dict))
+    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rid = e.get("run_id") or "(legacy)"
+            mt = e.get("mode_tag") or "default"
+            fw = e.get("framework")
+            if not fw:
+                continue
+            runs[(rid, mt)][fw][e.get("prompt", "")] = (e.get("total"), e.get("decision_ttft"))
+
+    latest: dict[str, str] = {}
+    for (rid, mt) in runs:
+        if mt not in latest or rid > latest[mt]:
+            latest[mt] = rid
+    if "default" not in latest:
+        print("No `default` mode runs found in bench_history.jsonl.")
+        return 1
+
+    default_runs = sorted({rid for (rid, mt) in runs if mt == "default"})
+
+    def short(p: str, n: int = 48) -> str:
+        return p[: n - 3] + "..." if len(p) > n else p
+
+    out: list[str] = []
+    out.append("# Benchmark results")
+    out.append("")
+    out.append("Snapshot of the latest bench runs across modes. Regenerate with:")
+    out.append("")
+    out.append("```bash")
+    out.append("python bench.py                  # adds a fresh default run to bench_history.jsonl")
+    out.append("python bench.py --write-results  # rewrites this file from the latest entries")
+    out.append("```")
+    out.append("")
+    out.append("See [BENCHMARKING.md](BENCHMARKING.md) for bench mechanics and mode flags.")
+    out.append("")
+
+    r12 = latest["default"]
+    out.append("## Current baseline — default mode")
+    out.append("")
+    out.append(f"Run `{r12}`.")
+    out.append("")
+    out.append("| prompt | pygentic total | pygentic ttft | hermes total | hermes ttft |")
+    out.append("|---|---:|---:|---:|---:|")
+    for p in all_prompts:
+        pyg = runs[(r12, "default")]["pygentic"].get(p, (None, None))
+        her = runs[(r12, "default")]["hermes"].get(p, (None, None))
+        cells = [
+            short(p),
+            f"{pyg[0]:.3f}" if pyg[0] is not None else "–",
+            f"{pyg[1]:.3f}" if pyg[1] is not None else "–",
+            f"{her[0]:.3f}" if her[0] is not None else "–",
+            f"{her[1]:.3f}" if her[1] is not None else "–",
+        ]
+        out.append("| " + " | ".join(cells) + " |")
+    out.append("")
+
+    if len(default_runs) >= 4:
+        key_runs = [
+            ("r1 first baseline", default_runs[0]),
+            (f"r{len(default_runs)-1} prior", default_runs[-2]),
+            (f"r{len(default_runs)} latest", default_runs[-1]),
+        ]
+        out.append("## Historical consistency — original 9 prompts")
+        out.append("")
+        out.append("Spot-check for regressions: if the latest column drifts >50% from r1 on")
+        out.append("the simple-tool prompts (calc, list, delete, cpu/disk), investigate.")
+        out.append("")
+        for fw in ("pygentic", "hermes"):
+            out.append(f"### {fw.capitalize()} — total (seconds)")
+            out.append("")
+            header = "| prompt |" + "".join(f" {label} |" for label, _ in key_runs)
+            out.append(header)
+            out.append("|---" + "|---:" * len(key_runs) + "|")
+            for p in original:
+                cells = [f"| {short(p)} |"]
+                for _, rid in key_runs:
+                    v = runs[(rid, "default")][fw].get(p, (None,))[0]
+                    cells.append(f" {v:.3f} |" if v is not None else " – |")
+                out.append("".join(cells))
+            out.append("")
+
+    out.append("## Mode comparison — latest run per mode")
+    out.append("")
+    modes_order = ["default", "think", "memory", "mcp", "mcp+think+memory"]
+    modes = [(mt, latest[mt]) for mt in modes_order if mt in latest]
+    for mt, rid in modes:
+        out.append(f"- **{mt}** ⟶ run `{rid}`")
+    out.append("")
+    for fw in ("pygentic", "hermes"):
+        out.append(f"### {fw.capitalize()} — total (seconds)")
+        out.append("")
+        header = "| prompt |" + "".join(f" {mt} |" for mt, _ in modes)
+        out.append(header)
+        out.append("|---" + "|---:" * len(modes) + "|")
+        for p in all_prompts:
+            cells = [f"| {short(p)} |"]
+            for mt, rid in modes:
+                v = runs[(rid, mt)][fw].get(p, (None,))[0]
+                cells.append(f" {v:.3f} |" if v is not None else " – |")
+            out.append("".join(cells))
+        out.append("")
+
+    out.append("## What to watch for in future runs")
+    out.append("")
+    out.append("- **Pygentic single-tool prompts** (calculate, list, delete, cpu/disk) should stay around 0.6–1.2 s. A jump to 3 s+ means the multi-step loop is firing when it shouldn't.")
+    out.append("- **Hermes single-tool prompts** should stay around 0.5–1.1 s.")
+    out.append("- **TTFT** for warm prompts should be ~0.10–0.15 s on both. Spikes to 0.5 s+ indicate a KV cache miss.")
+    out.append("- **Memory prompts** route reliably only with `--with-memory`. Raw-mode failures there are expected, not regressions.")
+    out.append("- **TTS prompts** are wall-clock-dominated by audio playback. Variance there is normal.")
+
+    path = ROOT / "docs" / "BENCH_RESULTS.md"
+    path.write_text("\n".join(out), encoding="utf-8")
+    print(f"wrote {path.relative_to(ROOT)} ({len(out)} lines, {len(default_runs)} default runs, {len(modes)} modes)")
+    return 0
+
+
 def show_compare(mode_tags: list[str]) -> int:
     """Cross-mode comparison table for the most recent run of each mode_tag.
 
@@ -416,6 +569,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history", action="store_true", help="Show recent bench-run history per prompt.")
     parser.add_argument("--history-limit", type=int, default=5, help="How many recent runs to show in --history.")
     parser.add_argument("--compare", nargs="+", default=None, help="Compare latest runs of these mode_tags (e.g. --compare default think memory).")
+    parser.add_argument("--write-results", action="store_true", help="Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl and exit.")
     parser.add_argument("--with-mcp", action="store_true", help="Enable MCP extension and add MCP-flavored prompts.")
     parser.add_argument("--think", action="store_true", help="Enable background thinking extension during the run.")
     parser.add_argument("--with-memory", action="store_true", help="Enable identity + session history + episodic log during the run.")
@@ -429,6 +583,8 @@ def main() -> int:
         return show_history(args.history_limit)
     if args.compare:
         return show_compare(args.compare)
+    if args.write_results:
+        return write_results_doc()
 
     prompts: list[tuple[str, str | None]] = DEFAULT_PROMPTS
     if args.prompts:

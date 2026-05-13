@@ -26,14 +26,15 @@ Tools:
 - speak — speak text aloud. Supports SSML: <break time="200ms"/> for pauses, <breath/> for soft inhales. args: {"text": "Hey there <break time=\"200ms\"/> ready when you are <breath/>"}
 - speak_file — read a workspace file and speak its contents aloud (also supports SSML in the file). args: {"path": "name.txt"}
 - web_search — DuckDuckGo web search; returns titles/urls/snippets. args: {"query": "search terms"}
+- get_weather — current weather at a location via wttr.in. args: {"location": "Hawaii"}
 - remember — save a fact in persistent unified memory. args: {"key": "video_length", "value": "90 seconds"}
 - recall — fetch a previously saved fact. args: {"key": "video_length"}
 - list_facts — list every fact currently in memory. args: {}
 - forget — remove a stored fact. args: {"key": "video_length"}
 
 Behavior depends on the turn:
-- First turn (user asks): output JSON only — either {"tool":"name","args":{...}} or {"final":"short answer"}.
-- Follow-up turn (after a tool result is provided): respond in plain text using only facts from the tool result. Never claim a file is in a location the tool result did not return. No markdown unless the user asked for it.
+- First turn (user asks): output JSON only — either {"tool":"name","args":{...}} or {"final":"short answer"}. If the user requests something none of the tools above can do, emit {"final":"I don't have a tool for X. I can <closest 1-2 capabilities>."} — never invent a tool error or pretend a tool ran when it didn't.
+- Follow-up turn (after a tool result is provided): if the tool result already answers the user's original question, emit {"final":"<brief plain-text summary>"} to stop. Only call another tool if the user explicitly asked for a follow-up action (e.g. "and speak it", "then save to a file", "narrate that"). Don't explore the workspace, drill into subdirectories, or open files the user didn't ask about. Default to finalizing.
 """
 
 # Back-compat aliases — old code paths can still import these names.

@@ -169,6 +169,7 @@ The latency reports in `latency.jsonl` carry TTFT + total time per stage so you 
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, request pipeline, framework differences
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — running benchmarks, reading history, regression detection
+- [docs/BENCH_RESULTS.md](docs/BENCH_RESULTS.md) — latest numbers per mode + historical consistency view
 - [docs/PROJECT.md](docs/PROJECT.md) — high-level project overview
 - [docs/SETUP.md](docs/SETUP.md) — install and verification
 - [docs/TODO.md](docs/TODO.md) — open work

@@ -4,6 +4,7 @@ High-level overview. For deep technical detail see:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, request pipeline, framework differences, key decisions
 - [BENCHMARKING.md](BENCHMARKING.md) — how to run benchmarks and read the history log
+- [BENCH_RESULTS.md](BENCH_RESULTS.md) — latest tracked numbers per mode + historical consistency view
 - [SETUP.md](SETUP.md) — install and verification
 - [TODO.md](TODO.md) — open work
 
