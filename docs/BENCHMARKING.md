@@ -11,7 +11,7 @@ root. `bench.py --history` reads that file and prints a trend view.
 .venv/bin/python bench.py                       # default mode (15 prompts, no extensions)
 .venv/bin/python bench.py --with-mcp            # adds MCP-flavored prompts; tags entries mode_tag=mcp
 .venv/bin/python bench.py --think               # background thinking enabled; tags entries mode_tag=think
-.venv/bin/python bench.py --only pygentic       # just one framework
+.venv/bin/python bench.py --only python_custom_json       # just one framework
 .venv/bin/python bench.py --prompts file.txt    # custom prompts (one per line)
 .venv/bin/python bench.py --skip-run            # re-summarize existing logs
 ```

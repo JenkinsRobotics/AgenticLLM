@@ -106,7 +106,7 @@ def write_log(entry: dict[str, Any]) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "latency.jsonl"
     entry = {
-        "framework": "pygentic",
+        "framework": "python_custom_json",
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "run_id": os.environ.get("BENCH_RUN_ID"),
         **entry,
@@ -141,14 +141,14 @@ def _record_turn(entry: dict[str, Any]) -> None:
 
         append_episodic({
             "timestamp": entry.get("timestamp"),
-            "framework": "pygentic",
+            "framework": "python_custom_json",
             "user": user,
             "decision_raw": decision_raw,
             "answer": entry.get("answer") or entry.get("final"),
             "run_id": entry.get("run_id"),
         })
     except Exception as exc:
-        print(f"[pygentic] episodic append failed: {exc}", file=sys.stderr, flush=True)
+        print(f"[python_custom_json] episodic append failed: {exc}", file=sys.stderr, flush=True)
 
 
 def decide(client, user_text: str):
@@ -371,7 +371,7 @@ def run_command(client, user_text: str, default_mode: str) -> None:
 
 def cli_loop(client, mode: str) -> int:
     ensure_workspace()
-    print(f"[pygentic] Workspace: {WORKSPACE}")
+    print(f"[python_custom_json] Workspace: {WORKSPACE}")
     print("Type 'exit' or 'quit' to stop.")
     while True:
         try:
@@ -476,7 +476,7 @@ def init_from_env(client) -> None:
     if os.environ.get("BENCH_NO_WARM_TTS") != "1":
         result = tools.warm_kokoro()
         if result.get("warmed"):
-            print(f"[pygentic] Kokoro warmed in {result.get('seconds')}s.", flush=True)
+            print(f"[python_custom_json] Kokoro warmed in {result.get('seconds')}s.", flush=True)
 
 
 def shutdown_extensions(wait: bool = True) -> None:
@@ -509,13 +509,13 @@ def init_extensions(args, client) -> None:
             if recent:
                 _session_history.extend(recent)
                 print(
-                    f"[pygentic] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
+                    f"[python_custom_json] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
                     flush=True,
                 )
             else:
-                print("[pygentic] memory on — identity injected; no prior episodic turns.", flush=True)
+                print("[python_custom_json] memory on — identity injected; no prior episodic turns.", flush=True)
         except Exception as exc:
-            print(f"[pygentic] --with-memory partial: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_custom_json] --with-memory partial: {exc}", file=sys.stderr, flush=True)
 
     if with_mcp:
         try:
@@ -536,9 +536,9 @@ def init_extensions(args, client) -> None:
                 _pipeline["system_prompt"] = f"{identity}\n\n{base}" if identity else base
                 names = list(tool_router.SAFE_TOOLS.keys()) + [s.qualified_name for s in specs]
                 _pipeline["grammar"] = tool_router.build_decision_grammar(names)
-                print(f"[pygentic] MCP enabled with {len(specs)} extended tool(s).", flush=True)
+                print(f"[python_custom_json] MCP enabled with {len(specs)} extended tool(s).", flush=True)
         except Exception as exc:
-            print(f"[pygentic] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_custom_json] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
 
     if with_thinking:
         try:
@@ -549,11 +549,11 @@ def init_extensions(args, client) -> None:
             # Pass the (possibly MCP-extended) system prompt so the thinking
             # call shares the KV cache prefix with decide/finalize.
             _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
-                client, "pygentic", lock, _pipeline["system_prompt"]
+                client, "python_custom_json", lock, _pipeline["system_prompt"]
             )
-            print("[pygentic] background thinking enabled — see thinking.jsonl.", flush=True)
+            print("[python_custom_json] background thinking enabled — see thinking.jsonl.", flush=True)
         except Exception as exc:
-            print(f"[pygentic] --think failed: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_custom_json] --think failed: {exc}", file=sys.stderr, flush=True)
 
 
 def main() -> int:
@@ -590,7 +590,7 @@ def main() -> int:
     is_interactive = not " ".join(args.prompt).strip()
     if is_interactive and not args.with_memory:
         args.with_memory = True
-        print("[pygentic] interactive chat — memory auto-enabled (identity + session history).", flush=True)
+        print("[python_custom_json] interactive chat — memory auto-enabled (identity + session history).", flush=True)
 
     init_extensions(args, client)
 
@@ -598,9 +598,9 @@ def main() -> int:
     if not args.no_warm_tts:
         result = tools.warm_kokoro()
         if result.get("warmed"):
-            print(f"[pygentic] Kokoro warmed in {result.get('seconds')}s.", flush=True)
+            print(f"[python_custom_json] Kokoro warmed in {result.get('seconds')}s.", flush=True)
         else:
-            print(f"[pygentic] Kokoro warmup skipped: {result.get('reason')}", file=sys.stderr, flush=True)
+            print(f"[python_custom_json] Kokoro warmup skipped: {result.get('reason')}", file=sys.stderr, flush=True)
 
     # Stash max_steps for run_command to read.
     _pipeline["max_steps"] = max(1, int(getattr(args, "max_steps", 4) or 4))
@@ -618,7 +618,7 @@ def main() -> int:
         runner = _pipeline["thinking_runner"]
         if runner is not None:
             if runner.pending() > 0:
-                print("[pygentic] waiting for background thinking jobs...", flush=True)
+                print("[python_custom_json] waiting for background thinking jobs...", flush=True)
             runner.shutdown(wait=True)
 
 

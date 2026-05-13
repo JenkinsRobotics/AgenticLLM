@@ -2,12 +2,15 @@
 """Dispatcher entry point.
 
 Usage:
-  python main.py pygentic [args...]     # run the Pygentic agent
-  python main.py hermes [args...]       # run the Hermes agent
-  python main.py [args...]              # defaults to pygentic
+  python main.py python_custom_json [args...]   # our JSON + GBNF framework
+  python main.py python_hermes_xml [args...]    # our Nous-XML-format framework
+  python main.py [args...]                       # defaults to python_custom_json
 
-All trailing args are passed through to the agent's own argparse (so e.g.
-`python main.py hermes --self-test` works).
+When we add the real upstream libraries, the dispatch table grows:
+  python main.py pygentic [args...]      # the real ruvnet/pygentic
+  python main.py hermes_agent [args...]  # the real nousresearch/hermes-agent
+
+All trailing args are passed through to the agent's own argparse.
 """
 
 from __future__ import annotations
@@ -15,22 +18,28 @@ from __future__ import annotations
 import sys
 
 
-FRAMEWORKS = {"pygentic", "hermes"}
+FRAMEWORKS = {
+    "python_custom_json",
+    "python_hermes_xml",
+    # Reserved for future upstream-library wrappers:
+    # "pygentic",       -> the real ruvnet/pygentic
+    # "hermes_agent",   -> the real nousresearch/hermes-agent
+}
 
 
 def main() -> int:
     argv = sys.argv[1:]
-    framework = "pygentic"
+    framework = "python_custom_json"
     if argv and argv[0] in FRAMEWORKS:
         framework = argv[0]
         argv = argv[1:]
 
     sys.argv = [f"{framework}/main.py", *argv]
 
-    if framework == "hermes":
-        from hermes.main import main as agent_main
+    if framework == "python_hermes_xml":
+        from python_hermes_xml.main import main as agent_main
     else:
-        from pygentic.main import main as agent_main
+        from python_custom_json.main import main as agent_main
     return agent_main()
 
 

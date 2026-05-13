@@ -183,9 +183,9 @@ You have access to the following tools. Function signatures are declared as JSON
 {schemas_block}
 </tools>
 
-The only writable area is the sandboxed workspace at hermes/workspace.
+The only writable area is the sandboxed workspace at python_hermes_xml/workspace.
 All "path" arguments are relative to that workspace root. Do NOT prefix paths
-with "hermes/", "workspace/", "~", or any absolute path. If the user asks to
+with "python_hermes_xml/", "workspace/", "~", or any absolute path. If the user asks to
 save to their Desktop / Downloads / etc., still save to the workspace —
 your follow-up message after the tool result will explain where the file went.
 

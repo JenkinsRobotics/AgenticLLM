@@ -1,12 +1,22 @@
 # AgenticLLM
 
-A fast local agentic LLM harness on macOS. Two frameworks — **Pygentic** (JSON + GBNF grammar) and **Hermes** (Nous Function-Calling) — run the same Gemma 4 26B-A4B model against the same 11 sandboxed tools, so you can A/B their prompt design, output format, and round-trip pattern head-to-head.
+A fast local agentic LLM harness on macOS. **Two hand-rolled frameworks** today, both running the same local Gemma 4 26B-A4B model:
+
+- **`python_custom_json/`** — our JSON + GBNF-grammar approach (originally labelled "Pygentic")
+- **`python_hermes_xml/`** — our implementation of the Nous Function-Calling XML format (originally labelled "Hermes")
+
+Coming next as comparison points:
+
+- **`pygentic/`** — the **real** `ruvnet/pygentic` PyPI library
+- **`hermes_agent/`** — the **real** `nousresearch/hermes-agent` framework
+
+The point of running all four against the same Gemma model is to identify which approach is best for our robot use case — speed, correctness, capability coverage.
 
 The goal is to maximize fast local realtime agentic performance and surface where prompt design + output format actually matter for tool-calling latency.
 
 ## What's in the box
 
-| | Pygentic | Hermes |
+| | `python_custom_json/` | `python_hermes_xml/` |
 |---|---|---|
 | Tool-call format | Bare JSON: `{"tool":"x","args":{...}}` | XML: `<tool_call>{"name":"x","arguments":{...}}</tool_call>` |
 | Tool declarations | Plain-text list in system prompt | JSON Schema in `<tools>` block |
@@ -50,8 +60,8 @@ The easiest way to get it is [LM Studio](https://lmstudio.ai/) — search for `g
 The safe-tool self-test runs the parser + every tool against canned inputs without loading the LLM:
 
 ```bash
-.venv/bin/python main.py pygentic --self-test
-.venv/bin/python main.py hermes   --self-test
+.venv/bin/python main.py python_custom_json --self-test
+.venv/bin/python main.py python_hermes_xml   --self-test
 ```
 
 If both print a series of `{"decision": ..., "result": ...}` lines without errors, the install is healthy.
@@ -61,8 +71,8 @@ If both print a series of `{"decision": ..., "result": ...}` lines without error
 ### Interactive chat
 
 ```bash
-.venv/bin/python main.py pygentic    # Pygentic chat loop
-.venv/bin/python main.py hermes      # Hermes chat loop
+.venv/bin/python main.py python_custom_json    # Pygentic chat loop
+.venv/bin/python main.py python_hermes_xml      # Hermes chat loop
 ```
 
 You'll see a `You:` prompt. Type anything; `exit`, `quit`, or Ctrl-C to leave. After each reply you'll see a latency report:
@@ -80,8 +90,8 @@ Latency:
 ### One-shot mode
 
 ```bash
-.venv/bin/python main.py pygentic "what time is it"
-.venv/bin/python main.py hermes "search the web for robot vacuum reviews"
+.venv/bin/python main.py python_custom_json "what time is it"
+.venv/bin/python main.py python_hermes_xml "search the web for robot vacuum reviews"
 ```
 
 Useful for scripting or running a fixed prompt without the interactive loop.
@@ -92,7 +102,7 @@ Useful for scripting or running a fixed prompt without the interactive loop.
 .venv/bin/python bench.py                       # default mode
 .venv/bin/python bench.py --with-mcp            # adds opt-in MCP prompts
 .venv/bin/python bench.py --think               # adds background thinking
-.venv/bin/python bench.py --only pygentic       # one framework only
+.venv/bin/python bench.py --only python_custom_json       # one framework only
 .venv/bin/python bench.py --prompts file.txt    # custom prompt list
 .venv/bin/python bench.py --skip-run            # re-summarize existing logs
 .venv/bin/python bench.py --history             # trend view across runs
@@ -130,18 +140,20 @@ Both frameworks expose the same 15 tools (11 in-process + 4 unified-memory tools
 
 ```
 AgenticLLM/
-├── main.py             # Dispatcher: python main.py [pygentic|hermes] [prompt]
+├── main.py             # Dispatcher: python main.py [python_custom_json|python_hermes_xml] [prompt]
 ├── bench.py            # Head-to-head benchmark + comparison table
 ├── requirements.txt
-├── pygentic/           # JSON + GBNF grammar framework
+├── python_custom_json/ # OUR JSON + GBNF grammar framework (was "pygentic/")
 │   ├── main.py          # decide / finalize / CLI loop
 │   ├── prompts.py       # Unified system prompt (shared decide+finalize)
 │   ├── tool_router.py   # SAFE_TOOLS, GBNF grammar, parser
-│   ├── tools.py         # Tool implementations (shared shape with hermes/)
+│   ├── tools.py         # Tool implementations
 │   ├── llm_client.py    # llama-cpp-python + server clients
 │   ├── logs/            # latency.jsonl (append-only history)
 │   └── workspace/       # Sandboxed file ops
-├── hermes/             # Nous Function-Calling framework (same shape)
+├── python_hermes_xml/  # OUR Nous Function-Calling XML format framework (was "hermes/")
+# pygentic/             # PENDING — real ruvnet/pygentic library wrapper
+# hermes_agent/         # PENDING — real nousresearch/hermes-agent wrapper
 ├── memory/             # Unified memory — shared across all interfaces
 │   ├── identity.md      # Stable persona, prepended to every system prompt
 │   ├── facts.json       # Atomic key/value scratchpad

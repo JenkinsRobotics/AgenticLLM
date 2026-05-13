@@ -9,7 +9,7 @@ at the project root so historical runs are easy to compare.
 
 Run:
   python bench.py                       # both frameworks, default prompts
-  python bench.py --only pygentic       # just one
+  python bench.py --only python_custom_json   # just one framework
   python bench.py --prompts file.txt    # custom prompt list (one per line)
   python bench.py --skip-run            # re-summarize existing logs
   python bench.py --history             # show recent runs per prompt
@@ -86,14 +86,14 @@ def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict
     expected_tool? Was there a parse fallback? Mismatches are accumulated
     and printed in the run summary.
     """
-    if name == "pygentic":
-        from pygentic.llm_client import LlamaCppPythonClient
-        from pygentic.main import init_from_env, run_command, shutdown_extensions
-        from pygentic.tools import ensure_workspace
-    elif name == "hermes":
-        from hermes.llm_client import LlamaCppPythonClient
-        from hermes.main import init_from_env, run_command, shutdown_extensions
-        from hermes.tools import ensure_workspace
+    if name == "python_custom_json":
+        from python_custom_json.llm_client import LlamaCppPythonClient
+        from python_custom_json.main import init_from_env, run_command, shutdown_extensions
+        from python_custom_json.tools import ensure_workspace
+    elif name == "python_hermes_xml":
+        from python_hermes_xml.llm_client import LlamaCppPythonClient
+        from python_hermes_xml.main import init_from_env, run_command, shutdown_extensions
+        from python_hermes_xml.tools import ensure_workspace
     else:
         raise ValueError(f"unknown framework: {name}")
 
@@ -378,11 +378,11 @@ def write_results_doc() -> int:
     out.append("")
     out.append(f"Run `{r12}`.")
     out.append("")
-    out.append("| prompt | pygentic total | pygentic ttft | hermes total | hermes ttft |")
+    out.append("| prompt | python_custom_json total | python_custom_json ttft | python_hermes_xml total | python_hermes_xml ttft |")
     out.append("|---|---:|---:|---:|---:|")
     for p in all_prompts:
-        pyg = runs[(r12, "default")]["pygentic"].get(p, (None, None))
-        her = runs[(r12, "default")]["hermes"].get(p, (None, None))
+        pyg = runs[(r12, "default")]["python_custom_json"].get(p, (None, None))
+        her = runs[(r12, "default")]["python_hermes_xml"].get(p, (None, None))
         cells = [
             short(p),
             f"{pyg[0]:.3f}" if pyg[0] is not None else "–",
@@ -404,7 +404,7 @@ def write_results_doc() -> int:
         out.append("Spot-check for regressions: if the latest column drifts >50% from r1 on")
         out.append("the simple-tool prompts (calc, list, delete, cpu/disk), investigate.")
         out.append("")
-        for fw in ("pygentic", "hermes"):
+        for fw in ("python_custom_json", "python_hermes_xml"):
             out.append(f"### {fw.capitalize()} — total (seconds)")
             out.append("")
             header = "| prompt |" + "".join(f" {label} |" for label, _ in key_runs)
@@ -425,7 +425,7 @@ def write_results_doc() -> int:
     for mt, rid in modes:
         out.append(f"- **{mt}** ⟶ run `{rid}`")
     out.append("")
-    for fw in ("pygentic", "hermes"):
+    for fw in ("python_custom_json", "python_hermes_xml"):
         out.append(f"### {fw.capitalize()} — total (seconds)")
         out.append("")
         header = "| prompt |" + "".join(f" {mt} |" for mt, _ in modes)
@@ -498,7 +498,7 @@ def show_compare(mode_tags: list[str]) -> int:
     # Header
     cols = ["prompt".ljust(48)]
     for mt in mode_tags:
-        for fw in ("pygentic", "hermes"):
+        for fw in ("python_custom_json", "python_hermes_xml"):
             cols.append(f"{mt[:6]}_{fw[:3]}_t".rjust(12))
     header = " ".join(cols)
     print("\n" + header)
@@ -508,7 +508,7 @@ def show_compare(mode_tags: list[str]) -> int:
         display = prompt[:45] + "..." if len(prompt) > 48 else prompt
         row = [display.ljust(48)]
         for mt in mode_tags:
-            for fw in ("pygentic", "hermes"):
+            for fw in ("python_custom_json", "python_hermes_xml"):
                 total, _ = idx.get((prompt, fw, mt), (None, None))
                 row.append(("%.3f" % total if total is not None else "  -").rjust(12))
         print(" ".join(row))
@@ -563,7 +563,7 @@ def show_history(limit_runs: int) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=["pygentic", "hermes"], help="Run just one framework.")
+    parser.add_argument("--only", choices=["python_custom_json", "python_hermes_xml"], help="Run just one framework.")
     parser.add_argument("--prompts", type=Path, help="Text file with one prompt per line.")
     parser.add_argument("--skip-run", action="store_true", help="Don't run new prompts; only summarize existing logs.")
     parser.add_argument("--history", action="store_true", help="Show recent bench-run history per prompt.")
@@ -597,7 +597,7 @@ def main() -> int:
     elif args.with_mcp:
         prompts = DEFAULT_PROMPTS + MCP_PROMPTS
 
-    chosen = [args.only] if args.only else ["pygentic", "hermes"]
+    chosen = [args.only] if args.only else ["python_custom_json", "python_hermes_xml"]
 
     # Derive a mode tag for the history entries.
     if args.mode_tag:

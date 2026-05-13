@@ -7,15 +7,17 @@ design, the output format, and the parse/round-trip pattern.
 ## System diagram
 
 ```
-              ┌──────────────────────────────────────────────┐
-              │              main.py (dispatcher)             │
-              │   python main.py [pygentic|hermes] [prompt]   │
-              └────────────┬─────────────────────┬───────────┘
-                           │                     │
-              ┌────────────▼─────────┐ ┌─────────▼──────────┐
-              │      pygentic/        │ │       hermes/       │
-              │  JSON + GBNF grammar  │ │   <tool_call> XML   │
-              └────────────┬──────────┘ └─────────┬───────────┘
+              ┌────────────────────────────────────────────────────────┐
+              │                  main.py (dispatcher)                   │
+              │ python main.py [python_custom_json|python_hermes_xml]   │
+              │   (future: pygentic | hermes_agent — real upstreams)    │
+              └────────────┬──────────────────────────┬─────────────────┘
+                           │                          │
+              ┌────────────▼──────────┐ ┌─────────────▼───────────┐
+              │  python_custom_json/  │ │  python_hermes_xml/      │
+              │  JSON + GBNF grammar  │ │  <tool_call> XML format  │
+              │  (was "pygentic/")    │ │  (was "hermes/")         │
+              └────────────┬──────────┘ └──────────────┬──────────┘
                            │                      │
                            │   Both share:        │
                            ├──────────────────────┤
@@ -98,7 +100,7 @@ from the tool. This shaves tokens from every decision output.
 
 ### 4. Sandboxed workspace per framework
 
-`pygentic/workspace/` and `hermes/workspace/` are independent. Every file
+`python_custom_json/workspace/` and `python_hermes_xml/workspace/` are independent. Every file
 tool resolves paths through `workspace_path()` which `Path.resolve()`s and
 verifies the result stays inside `WORKSPACE`. Symlinks pointing outside the
 sandbox get rejected. The model can request "save to Desktop" all it likes;

@@ -113,7 +113,7 @@ def write_log(entry: dict[str, Any]) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "latency.jsonl"
     entry = {
-        "framework": "hermes",
+        "framework": "python_hermes_xml",
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "run_id": os.environ.get("BENCH_RUN_ID"),
         **entry,
@@ -143,14 +143,14 @@ def _record_turn(entry: dict[str, Any]) -> None:
 
         append_episodic({
             "timestamp": entry.get("timestamp"),
-            "framework": "hermes",
+            "framework": "python_hermes_xml",
             "user": user,
             "decision_raw": decision_raw,
             "answer": entry.get("answer") or entry.get("final"),
             "run_id": entry.get("run_id"),
         })
     except Exception as exc:
-        print(f"[hermes] episodic append failed: {exc}", file=sys.stderr, flush=True)
+        print(f"[python_hermes_xml] episodic append failed: {exc}", file=sys.stderr, flush=True)
 
 
 def decide(client, user_text: str):
@@ -392,7 +392,7 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
 
 def cli_loop(client, mode: str) -> int:
     ensure_workspace()
-    print(f"[hermes] Workspace: {WORKSPACE}")
+    print(f"[python_hermes_xml] Workspace: {WORKSPACE}")
     print("Type 'exit' or 'quit' to stop.")
     while True:
         try:
@@ -497,7 +497,7 @@ def init_from_env(client) -> None:
     if os.environ.get("BENCH_NO_WARM_TTS") != "1":
         result = tools.warm_kokoro()
         if result.get("warmed"):
-            print(f"[hermes] Kokoro warmed in {result.get('seconds')}s.", flush=True)
+            print(f"[python_hermes_xml] Kokoro warmed in {result.get('seconds')}s.", flush=True)
 
 
 def shutdown_extensions(wait: bool = True) -> None:
@@ -525,13 +525,13 @@ def init_extensions(args, client) -> None:
             if recent:
                 _session_history.extend(recent)
                 print(
-                    f"[hermes] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
+                    f"[python_hermes_xml] memory on — identity injected, loaded {len(recent)//2} recent turn(s).",
                     flush=True,
                 )
             else:
-                print("[hermes] memory on — identity injected; no prior episodic turns.", flush=True)
+                print("[python_hermes_xml] memory on — identity injected; no prior episodic turns.", flush=True)
         except Exception as exc:
-            print(f"[hermes] --with-memory partial: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_hermes_xml] --with-memory partial: {exc}", file=sys.stderr, flush=True)
 
     if with_mcp:
         try:
@@ -550,9 +550,9 @@ def init_extensions(args, client) -> None:
                 ]
                 # Rebuild via the helper so identity stays prepended.
                 _pipeline["system_prompt"] = _build_base_system_prompt(extra_schemas)
-                print(f"[hermes] MCP enabled with {len(specs)} extended tool(s).", flush=True)
+                print(f"[python_hermes_xml] MCP enabled with {len(specs)} extended tool(s).", flush=True)
         except Exception as exc:
-            print(f"[hermes] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_hermes_xml] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
 
     if with_thinking:
         try:
@@ -561,11 +561,11 @@ def init_extensions(args, client) -> None:
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock
             _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
-                client, "hermes", lock, _pipeline["system_prompt"]
+                client, "python_hermes_xml", lock, _pipeline["system_prompt"]
             )
-            print("[hermes] background thinking enabled — see thinking.jsonl.", flush=True)
+            print("[python_hermes_xml] background thinking enabled — see thinking.jsonl.", flush=True)
         except Exception as exc:
-            print(f"[hermes] --think failed: {exc}", file=sys.stderr, flush=True)
+            print(f"[python_hermes_xml] --think failed: {exc}", file=sys.stderr, flush=True)
 
 
 def main() -> int:
@@ -599,16 +599,16 @@ def main() -> int:
     is_interactive = not " ".join(args.prompt).strip()
     if is_interactive and not args.with_memory:
         args.with_memory = True
-        print("[hermes] interactive chat — memory auto-enabled (identity + session history).", flush=True)
+        print("[python_hermes_xml] interactive chat — memory auto-enabled (identity + session history).", flush=True)
 
     init_extensions(args, client)
 
     if not args.no_warm_tts:
         result = tools.warm_kokoro()
         if result.get("warmed"):
-            print(f"[hermes] Kokoro warmed in {result.get('seconds')}s.", flush=True)
+            print(f"[python_hermes_xml] Kokoro warmed in {result.get('seconds')}s.", flush=True)
         else:
-            print(f"[hermes] Kokoro warmup skipped: {result.get('reason')}", file=sys.stderr, flush=True)
+            print(f"[python_hermes_xml] Kokoro warmup skipped: {result.get('reason')}", file=sys.stderr, flush=True)
 
     _pipeline["max_steps"] = max(1, int(getattr(args, "max_steps", 4) or 4))
 
@@ -623,7 +623,7 @@ def main() -> int:
         runner = _pipeline["thinking_runner"]
         if runner is not None:
             if runner.pending() > 0:
-                print("[hermes] waiting for background thinking jobs...", flush=True)
+                print("[python_hermes_xml] waiting for background thinking jobs...", flush=True)
             runner.shutdown(wait=True)
 
 
