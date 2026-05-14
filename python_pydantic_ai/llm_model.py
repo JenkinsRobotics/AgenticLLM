@@ -22,7 +22,8 @@ from typing import Any
 # sees a proper ToolCallPart and not a raw text blob.
 _DRIFT_PATTERNS = [
     # <|tool_call>call:name{...}<tool_call|>  (Gemma's native form)
-    re.compile(r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w]*)\s*\{(.*?)\}\s*<tool_call\|>", re.DOTALL),
+    # Tool names allow `:` and `/` so MCP qualified names like mcp:web/fetch salvage.
+    re.compile(r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w:/.\-]*)\s*\{(.*?)\}\s*<tool_call\|>", re.DOTALL),
     # <|tool_call|>{"name": "x", "arguments": {...}}<|/tool_call|>
     re.compile(r"<\|tool_call\|>\s*(\{.*?\})\s*<\|/tool_call\|>", re.DOTALL),
     # <tool_call>{"name": "x", "arguments": {...}}</tool_call>  (standard Hermes)
@@ -59,6 +60,11 @@ def _parse_loose_args(raw: str) -> dict[str, Any]:
 
 def _extract_drift_tool_calls(text: str) -> list[dict[str, Any]]:
     """Find tool calls in non-standard formats. Returns OpenAI-style tool_calls."""
+    # Cheap early-exit: every drift pattern starts with `<`. If the model's
+    # response has no angle brackets, we know nothing to salvage — skip the
+    # three regex sweeps entirely.
+    if "<" not in text:
+        return []
     out: list[dict[str, Any]] = []
     for pattern in _DRIFT_PATTERNS:
         for match in pattern.finditer(text):
@@ -110,6 +116,11 @@ class LlamaCppModel(Model):
         self._model_name_value = model_name
         self.last_call_times: list[float] = []
         self.last_call_ttft: list[float] = []
+        # OpenAI-format tool defs are stable per agent. Cache by id() of the
+        # function_tools list pydantic-ai hands us — saves rebuilding ~20
+        # dicts every request.
+        self._openai_tools_cache_key: int | None = None
+        self._openai_tools_cache_value: list[dict[str, Any]] | None = None
 
     def reset_timings(self) -> None:
         self.last_call_times = []
@@ -145,7 +156,7 @@ class LlamaCppModel(Model):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = settings.get("tool_choice", "auto")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         started = time.perf_counter()
         completion = await loop.run_in_executor(
             None, lambda: self._llama.create_chat_completion(**kwargs)
@@ -223,6 +234,12 @@ class LlamaCppModel(Model):
         return out
 
     def _to_openai_tools(self, function_tools: list[Any]) -> list[dict[str, Any]]:
+        # Pydantic-AI hands us the same function_tools list every request for
+        # a given agent. Cache the OpenAI conversion by `id()` so we don't
+        # rebuild ~20 dicts on every turn.
+        key = id(function_tools) if function_tools else 0
+        if key == self._openai_tools_cache_key and self._openai_tools_cache_value is not None:
+            return self._openai_tools_cache_value
         result: list[dict[str, Any]] = []
         for t in function_tools or []:
             schema = getattr(t, "parameters_json_schema", None) or {"type": "object", "properties": {}}
@@ -234,6 +251,8 @@ class LlamaCppModel(Model):
                     "parameters": schema,
                 },
             })
+        self._openai_tools_cache_key = key
+        self._openai_tools_cache_value = result
         return result
 
     def _to_model_response(self, completion: dict[str, Any]) -> ModelResponse:

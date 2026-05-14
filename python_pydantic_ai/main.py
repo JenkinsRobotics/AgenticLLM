@@ -5,7 +5,7 @@ Reuses the same in-process llama-cpp-python `Llama` instance our other
 frameworks load. The agent loop, tool calling, message conversion, retry
 logic — all of that is handled by pydantic-ai itself. We provide:
   - LlamaCppModel: in-process adapter for the local Gemma model
-  - The 19 in-process tools + optional MCP fetch tool
+  - The 19 in-process tools + every tool exposed by configured MCP servers
   - Memory extension (identity injection + episodic continuity)
   - Thinking extension (background planning calls)
   - A run_command shim with the same signature bench.py expects from the
@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
 
 from . import prompts, tools
 from .llm_model import LlamaCppModel
@@ -123,6 +123,42 @@ def _record_turn(entry: dict[str, Any]) -> None:
 # ============================================================================
 # Agent construction
 # ============================================================================
+def _build_mcp_tools(specs: list[Any]) -> list[Tool]:
+    """Build Pydantic AI Tool objects for every MCP tool the bridge exposes.
+
+    Each MCP tool's advertised JSON Schema becomes the pydantic-ai tool
+    schema directly via Tool.from_schema, so adding a new MCP server in
+    mcp_config.json automatically surfaces its tools — no code change.
+    """
+    if not specs:
+        return []
+
+    tools_list: list[Tool] = []
+    for spec in specs:
+        schema = spec.input_schema if isinstance(spec.input_schema, dict) else {}
+        if not schema or "type" not in schema:
+            schema = {"type": "object", "properties": {}, **schema}
+
+        def _make_caller(qualified_name: str):
+            def _call(**kwargs: Any) -> dict[str, Any]:
+                import mcp_bridge
+
+                return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
+
+            _call.__name__ = qualified_name.replace(":", "_").replace("/", "_")
+            return _call
+
+        tools_list.append(
+            Tool.from_schema(
+                function=_make_caller(spec.qualified_name),
+                name=spec.qualified_name,
+                description=spec.description or f"MCP tool {spec.qualified_name}",
+                json_schema=schema,
+            )
+        )
+    return tools_list
+
+
 def build_agent(
     client: Any,
     system_prompt: str,
@@ -130,15 +166,16 @@ def build_agent(
 ) -> Agent[None, str]:
     """Build a Pydantic AI Agent backed by our in-process llama-cpp-python model.
 
-    Registers the 19 base tools. If mcp_specs is provided, also registers an
-    MCP fetch tool wrapper (currently only mcp:web/fetch is supported — the
-    schema is hardcoded since pydantic-ai needs typed signatures).
+    Registers the 19 in-process tools. Any tools advertised by an MCP server
+    via mcp_bridge are registered dynamically from their JSON Schema, so
+    adding a new MCP server requires no code change here.
     """
     model = LlamaCppModel(client.llm)
     agent: Agent[None, str] = Agent(
         model=model,
         system_prompt=system_prompt,
         tool_retries=2,
+        tools=_build_mcp_tools(mcp_specs or []),
     )
 
     @agent.tool_plain
@@ -235,16 +272,6 @@ def build_agent(
     def open_app(app_name: str) -> dict:
         """Launch a macOS application by name."""
         return tools.open_app(app_name=app_name)
-
-    # MCP tools — currently only mcp:web/fetch is wired (its schema is the
-    # only one we hardcode for type-safe pydantic-ai integration).
-    if mcp_specs and any(s.qualified_name == "mcp:web/fetch" for s in mcp_specs):
-        @agent.tool_plain
-        def fetch_url(url: str, max_length: int = 5000) -> dict:
-            """Fetch a URL through the MCP web/fetch server. Returns markdown content."""
-            import mcp_bridge
-
-            return mcp_bridge.call_mcp_tool("mcp:web/fetch", {"url": url, "max_length": max_length})
 
     return agent
 
@@ -354,7 +381,7 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
 
     elapsed = time.perf_counter() - started
     answer = result.output if hasattr(result, "output") else str(result)
-    tool_activity = _summarize_tool_activity(result)
+    tool_activity, first_decision = _walk_new_messages(result)
     tool_calls = len(tool_activity)
 
     llm_times = list(model.last_call_times)
@@ -386,7 +413,7 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         "answer": answer,
         "tool_calls": tool_calls,
         "tool_activity": tool_activity,
-        "decision": _extract_first_decision(result),
+        "decision": first_decision,
         "latency": asdict(report),
     })
 
@@ -396,6 +423,65 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+
+def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
+    """Voice-loop entry point.
+
+    Same agent and session history as run_command, but returns a structured
+    result instead of printing. The caller (voice_assistant) speaks the text
+    through its own TTS pipeline — unless the agent already vocalized via a
+    speak/speak_file tool call, in which case spoke_via_tool=True and the
+    caller should skip its own TTS to avoid double-speaking.
+    """
+    agent = _get_agent(client)
+    model: LlamaCppModel = agent.model  # type: ignore[assignment]
+    model.reset_timings()
+
+    lock = _pipeline["llm_lock"]
+    started = time.perf_counter()
+    try:
+        if lock is not None:
+            with lock:
+                result = agent.run_sync(user_text, message_history=_session_history or None)
+        else:
+            result = agent.run_sync(user_text, message_history=_session_history or None)
+    except Exception as exc:
+        return {
+            "text": "",
+            "error": str(exc),
+            "tool_activity": [],
+            "spoke_via_tool": False,
+            "elapsed_s": time.perf_counter() - started,
+        }
+
+    elapsed = time.perf_counter() - started
+    text = (result.output if hasattr(result, "output") else str(result)) or ""
+    text = text.strip()
+    tool_activity, first_decision = _walk_new_messages(result)
+    spoke_via_tool = any("🔊" in line for line in tool_activity)
+
+    write_log({
+        "user": user_text,
+        "answer": text,
+        "tool_calls": len(tool_activity),
+        "tool_activity": tool_activity,
+        "decision": first_decision,
+        "latency": {"total": elapsed, "voice": True},
+    })
+
+    if _pipeline["with_memory"]:
+        _extend_session_history_from_result(result)
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+    return {
+        "text": text,
+        "tool_activity": tool_activity,
+        "spoke_via_tool": spoke_via_tool,
+        "elapsed_s": elapsed,
+    }
 
 
 def _extend_session_history_from_result(result: Any) -> None:
@@ -416,18 +502,23 @@ def _extend_session_history_from_result(result: Any) -> None:
 
 
 # ============================================================================
-# Tool-activity surfacing for chat display
+# Tool-activity surfacing for chat display + decision extraction
 # ============================================================================
-def _summarize_tool_activity(result: Any) -> list[str]:
-    """Walk the agent's message history and produce one human-readable line
-    per tool call. Specially handles speak / speak_file so the spoken text
-    is echoed to chat (otherwise the user can't see what was said)."""
+def _walk_new_messages(result: Any) -> tuple[list[str], dict[str, Any] | None]:
+    """Single pass over `result.new_messages()` that produces both:
+      - tool_activity: human-readable lines per tool call (for chat display)
+      - first_decision: the first tool call this turn (for the decision log)
+
+    Combines what used to be two separate iterations into one — small win,
+    but both consumers run unconditionally on every turn so it's free.
+    """
     out: list[str] = []
+    first_decision: dict[str, Any] | None = None
     pending_calls: dict[str, dict[str, Any]] = {}
     try:
         msgs = list(result.new_messages()) if hasattr(result, "new_messages") else list(result.all_messages())
     except Exception:
-        msgs = []
+        return out, None
     for msg in msgs:
         kind = getattr(msg, "kind", None)
         if kind == "response":
@@ -437,6 +528,8 @@ def _summarize_tool_activity(result: Any) -> list[str]:
                         "name": part.tool_name,
                         "args": part.args,
                     }
+                    if first_decision is None:
+                        first_decision = {"tool": part.tool_name, "args": part.args, "mode": "natural"}
         elif kind == "request":
             for part in msg.parts:
                 if getattr(part, "part_kind", None) != "tool-return":
@@ -446,7 +539,7 @@ def _summarize_tool_activity(result: Any) -> list[str]:
                 name = (call or {}).get("name") or part.tool_name
                 args = (call or {}).get("args") or {}
                 out.append(_format_call_line(name, args, part.content))
-    return out
+    return out, first_decision
 
 
 def _format_call_line(name: str, args: Any, tool_result: Any) -> str:
@@ -490,23 +583,6 @@ def _format_call_line(name: str, args: Any, tool_result: Any) -> str:
         if len(args_repr) > 60:
             args_repr = args_repr[:57] + "..."
     return f"  ▸ {name}({args_repr})"
-
-
-def _extract_first_decision(result: Any) -> dict[str, Any] | None:
-    """First tool call from the CURRENT turn only. We must not walk
-    `all_messages()` here — that includes prior-turn history loaded via
-    memory, which would mis-attribute every turn's decision to turn 1."""
-    try:
-        msgs = result.new_messages() if hasattr(result, "new_messages") else result.all_messages()
-        for msg in msgs:
-            if getattr(msg, "kind", None) != "response":
-                continue
-            for part in msg.parts:
-                if getattr(part, "part_kind", None) == "tool-call":
-                    return {"tool": part.tool_name, "args": part.args, "mode": "natural"}
-    except Exception:
-        pass
-    return None
 
 
 # ============================================================================
