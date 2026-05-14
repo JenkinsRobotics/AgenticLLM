@@ -22,6 +22,7 @@ CLI flags:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -32,10 +33,102 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai import Agent, Tool
+from pydantic_ai import Agent, CallToolsNode, ModelRequestNode, Tool
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+from pydantic_ai.usage import RequestUsage
 
 from . import prompts, tools
 from .llm_model import LlamaCppModel
+
+
+# Tools whose dict result already *is* the user-facing answer. When the agent
+# picks one of these and there are no other tool calls in the same response,
+# we skip pydantic-ai's "final-answer" LLM round-trip (~285ms saved per turn).
+# The formatter below renders each result dict into a one-line plain string
+# that matches what the LLM would have generated.
+SKIP_FINAL_TOOLS = frozenset({
+    "get_time",
+    "calculate",
+    "system_status",
+    "list_facts",
+    "recall",
+    "remember",
+    "forget",
+    "delete_file",
+    "create_file",
+    "append_file",
+    "open_file",
+    "open_app",
+    "launch_url",
+    # The speak/speak_file tools already vocalize the answer; the user has
+    # heard it. Asking the LLM to add "OK." costs ~280ms for no benefit.
+    "speak",
+    "speak_file",
+})
+
+
+def _format_tool_result_as_answer(name: str, result: Any) -> str:
+    """Render a tool result dict into the short final answer the LLM would
+    have generated, so we can skip the final-LLM round-trip."""
+    if not isinstance(result, dict):
+        return str(result)
+
+    if name == "get_time":
+        return result.get("datetime") or "Time unavailable."
+    if name == "calculate":
+        val = result.get("result")
+        return str(val) if val is not None else "Calculation failed."
+    if name == "system_status":
+        load = result.get("load_average")
+        disk = result.get("disk") or {}
+        parts = []
+        if load:
+            parts.append(f"load {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}")
+        if disk:
+            parts.append(
+                f"disk {disk.get('used_gb', 0):.1f}/{disk.get('total_gb', 0):.1f} GB "
+                f"({disk.get('free_gb', 0):.1f} GB free)"
+            )
+        return ", ".join(parts) or "System status unavailable."
+    if name == "list_facts":
+        facts = result.get("facts") or {}
+        if not facts:
+            return "I don't have any facts saved about you yet."
+        return "; ".join(f"{k}: {v}" for k, v in facts.items())
+    if name == "recall":
+        if result.get("found"):
+            return str(result.get("value", ""))
+        return f"I don't have a value for {result.get('key')!r}."
+    if name == "remember":
+        return f"Got it — remembered {result.get('key')!r}." if result.get("remembered") else "Couldn't save that."
+    if name == "forget":
+        if result.get("forgotten"):
+            return f"Forgot {result.get('key')!r}."
+        return f"No saved value under {result.get('key')!r}."
+    if name == "delete_file":
+        return f"Deleted {result.get('path', '')}." if result.get("deleted") else "Couldn't delete that file."
+    if name in ("create_file", "append_file"):
+        if result.get("created") or result.get("appended"):
+            return f"Saved to {result.get('path', '')}."
+        return "Couldn't save that file."
+    if name == "open_file":
+        return f"Opened {result.get('path', '')}." if result.get("opened") else "Couldn't open that file."
+    if name == "open_app":
+        return f"Launched {result.get('app', '')}." if result.get("opened") else "Couldn't launch that app."
+    if name == "launch_url":
+        return f"Opened {result.get('url', '')}." if result.get("opened") else "Couldn't open that URL."
+    if name in ("speak", "speak_file"):
+        # The audio has played. No extra text needed for the user.
+        if result.get("spoken") is True:
+            return ""
+        return f"Couldn't speak: {result.get('reason', 'unknown')}"
+    return str(result)
 
 
 LOG_DIR = Path(__file__).resolve().parent / "logs"
@@ -338,6 +431,81 @@ def _episodic_to_messages(turns: list[dict[str, str]]) -> list[Any]:
     return out
 
 
+async def _run_via_iter(
+    agent: Agent,
+    user_text: str,
+    message_history: list[Any] | None,
+) -> dict[str, Any]:
+    """Drive the agent step-by-step via agent.iter() so we can intercept
+    before the final-answer LLM call fires.
+
+    Returns a dict with:
+      - result: the AgentRun's result (None if we skipped)
+      - skipped: True when we short-circuited the final LLM call
+      - skipped_text: the synthesized final answer (when skipped)
+      - skipped_msgs: the messages to extend session history with (when skipped)
+      - first_decision: the first tool the agent picked
+    """
+    first_decision: dict[str, Any] | None = None
+    skip_final = False
+    skip_tool_name: str | None = None
+    skip_result: Any = None
+
+    async with agent.iter(user_text, message_history=message_history or None) as run:
+        async for node in run:
+            if isinstance(node, CallToolsNode):
+                tool_parts = [
+                    p for p in node.model_response.parts
+                    if hasattr(p, "tool_call_id")
+                ]
+                if first_decision is None and tool_parts:
+                    tc = tool_parts[0]
+                    first_decision = {"tool": tc.tool_name, "args": tc.args, "mode": "natural"}
+                    if len(tool_parts) == 1 and tc.tool_name in SKIP_FINAL_TOOLS:
+                        skip_final = True
+                        skip_tool_name = tc.tool_name
+
+            # When the next ModelRequestNode appears AFTER our skip-tool's
+            # CallToolsNode, that's the would-be final LLM call. The tool
+            # return is in node.request.parts — read it and bail out so
+            # pydantic-ai never fires the LLM.
+            if skip_final and isinstance(node, ModelRequestNode):
+                for p in node.request.parts:
+                    if isinstance(p, ToolReturnPart):
+                        skip_result = p.content
+                        break
+                if skip_result is not None:
+                    break
+        else:
+            # Loop exhausted normally — End was reached, final LLM ran.
+            return {
+                "result": run.result,
+                "skipped": False,
+                "first_decision": first_decision,
+            }
+
+    # Skip path. Synthesize the final answer and build the minimal pair of
+    # messages to extend session history with (we keep the conversation in
+    # canonical user → assistant form rather than leaking the tool internals).
+    text = _format_tool_result_as_answer(skip_tool_name or "", skip_result)
+    skipped_msgs = [
+        ModelRequest(parts=[UserPromptPart(content=user_text)]),
+        ModelResponse(
+            parts=[TextPart(content=text)],
+            usage=RequestUsage(input_tokens=0, output_tokens=0),
+            model_name="local-gemma-4-26b-a4b",
+            timestamp=datetime.now(timezone.utc),
+        ),
+    ]
+    return {
+        "result": None,
+        "skipped": True,
+        "skipped_text": text,
+        "skipped_msgs": skipped_msgs,
+        "first_decision": first_decision,
+    }
+
+
 # ============================================================================
 # run_command — main agent invocation, with latency split + history mgmt
 # ============================================================================
@@ -356,9 +524,9 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
     try:
         if lock is not None:
             with lock:
-                result = agent.run_sync(user_text, message_history=_session_history or None)
+                iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
         else:
-            result = agent.run_sync(user_text, message_history=_session_history or None)
+            iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
     except Exception as exc:
         elapsed = time.perf_counter() - started
         print(f"Pydantic AI agent failed: {exc}")
@@ -380,8 +548,23 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         return
 
     elapsed = time.perf_counter() - started
-    answer = result.output if hasattr(result, "output") else str(result)
-    tool_activity, first_decision = _walk_new_messages(result)
+    skipped = iter_out["skipped"]
+    first_decision = iter_out["first_decision"]
+    result = iter_out.get("result")
+
+    if skipped:
+        answer = iter_out["skipped_text"]
+        # Synthesize the tool_activity line so the caller still sees what happened.
+        if first_decision is not None:
+            tool_activity = [
+                _format_call_line(first_decision["tool"], first_decision.get("args") or {}, None)
+            ]
+        else:
+            tool_activity = []
+    else:
+        answer = result.output if hasattr(result, "output") else str(result)
+        tool_activity, walked_decision = _walk_new_messages(result)
+        first_decision = first_decision or walked_decision
     tool_calls = len(tool_activity)
 
     llm_times = list(model.last_call_times)
@@ -405,6 +588,8 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
     if answer:
         print(answer)
     print_latency(report)
+    if skipped:
+        print("  (final-LLM skipped — tool result returned directly)")
     if tool_calls > 1:
         print(f"  (chained {tool_calls} tool calls)")
 
@@ -414,12 +599,19 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         "tool_calls": tool_calls,
         "tool_activity": tool_activity,
         "decision": first_decision,
+        "skipped_final": skipped,
         "latency": asdict(report),
     })
 
     # Memory: append new messages to session history + queue background thinking
     if _pipeline["with_memory"]:
-        _extend_session_history_from_result(result)
+        if skipped:
+            _session_history.extend(iter_out["skipped_msgs"])
+            overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+            if overflow > 0:
+                del _session_history[:overflow]
+        else:
+            _extend_session_history_from_result(result)
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
@@ -443,9 +635,9 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
     try:
         if lock is not None:
             with lock:
-                result = agent.run_sync(user_text, message_history=_session_history or None)
+                iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
         else:
-            result = agent.run_sync(user_text, message_history=_session_history or None)
+            iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
     except Exception as exc:
         return {
             "text": "",
@@ -456,9 +648,21 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
         }
 
     elapsed = time.perf_counter() - started
-    text = (result.output if hasattr(result, "output") else str(result)) or ""
-    text = text.strip()
-    tool_activity, first_decision = _walk_new_messages(result)
+    skipped = iter_out["skipped"]
+    first_decision = iter_out["first_decision"]
+    result = iter_out.get("result")
+
+    if skipped:
+        text = iter_out["skipped_text"]
+        tool_activity = (
+            [_format_call_line(first_decision["tool"], first_decision.get("args") or {}, None)]
+            if first_decision is not None else []
+        )
+    else:
+        text = (result.output if hasattr(result, "output") else str(result)) or ""
+        text = text.strip()
+        tool_activity, walked = _walk_new_messages(result)
+        first_decision = first_decision or walked
     spoke_via_tool = any("🔊" in line for line in tool_activity)
 
     write_log({
@@ -467,11 +671,18 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
         "tool_calls": len(tool_activity),
         "tool_activity": tool_activity,
         "decision": first_decision,
+        "skipped_final": skipped,
         "latency": {"total": elapsed, "voice": True},
     })
 
     if _pipeline["with_memory"]:
-        _extend_session_history_from_result(result)
+        if skipped:
+            _session_history.extend(iter_out["skipped_msgs"])
+            overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+            if overflow > 0:
+                del _session_history[:overflow]
+        else:
+            _extend_session_history_from_result(result)
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
@@ -481,6 +692,7 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
         "tool_activity": tool_activity,
         "spoke_via_tool": spoke_via_tool,
         "elapsed_s": elapsed,
+        "skipped_final": skipped,
     }
 
 

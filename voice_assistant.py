@@ -24,6 +24,8 @@ Just hit Run. Loads can take ~15–25s the first time.
 from __future__ import annotations
 
 import collections
+import importlib
+import os
 import queue
 import re
 import sys
@@ -38,13 +40,29 @@ import sounddevice as sd
 import webrtcvad
 from scipy.signal import resample_poly
 
-from python_pydantic_ai.main import (
-    LlamaCppPythonClient,
-    init_extensions,
-    run_for_voice,
-    shutdown_extensions,
-)
-from python_pydantic_ai import tools as agent_tools
+
+# Framework adapter — picks pydantic_ai (default) or hermes_xml so we can
+# A/B compare under the same mic+TTS+AEC pipeline. Each framework exposes the
+# same surface: LlamaCppPythonClient, init_extensions(args, client),
+# run_for_voice(client, text), shutdown_extensions(wait), and a tools module
+# with ensure_workspace().
+_VOICE_FRAMEWORK = os.environ.get("VOICE_FRAMEWORK", "pydantic_ai").strip()
+_FRAMEWORK_MODULES = {
+    "pydantic_ai": ("python_pydantic_ai.main", "python_pydantic_ai.tools"),
+    "hermes_xml": ("python_hermes_xml.main", "python_hermes_xml.tools"),
+}
+if _VOICE_FRAMEWORK not in _FRAMEWORK_MODULES:
+    raise RuntimeError(
+        f"Unknown VOICE_FRAMEWORK={_VOICE_FRAMEWORK!r}; "
+        f"expected one of {list(_FRAMEWORK_MODULES)}."
+    )
+_FW_MAIN = importlib.import_module(_FRAMEWORK_MODULES[_VOICE_FRAMEWORK][0])
+agent_tools = importlib.import_module(_FRAMEWORK_MODULES[_VOICE_FRAMEWORK][1])
+
+LlamaCppPythonClient = _FW_MAIN.LlamaCppPythonClient
+init_extensions = _FW_MAIN.init_extensions
+run_for_voice = _FW_MAIN.run_for_voice
+shutdown_extensions = _FW_MAIN.shutdown_extensions
 
 
 # ── config ─────────────────────────────────────────────────────────────
@@ -372,9 +390,11 @@ def find_wake(text: str) -> tuple[bool, str]:
 
 # ── Agent (pydantic_ai) ───────────────────────────────────────────────
 def load_agent_client():
-    """Load the pydantic_ai client + extensions once. The Llama instance
-    inside the client is the model we share with the agent."""
-    print(f"[agent] loading {LLM_MODEL_PATH.name}...", flush=True)
+    """Load the selected framework's client + extensions once. The Llama
+    instance inside the client is the model we share with the agent.
+    Framework choice comes from VOICE_FRAMEWORK env var (default pydantic_ai;
+    `hermes_xml` for the head-to-head comparison)."""
+    print(f"[agent] framework={_VOICE_FRAMEWORK} — loading {LLM_MODEL_PATH.name}...", flush=True)
     t0 = time.perf_counter()
     client = LlamaCppPythonClient(model_path=LLM_MODEL_PATH, ctx=4096, warmup=True)
     print(f"[agent] loaded in {time.perf_counter()-t0:.1f}s", flush=True)
@@ -387,7 +407,7 @@ def load_agent_client():
 
     init_extensions(_Args(), client)
     agent_tools.ensure_workspace()
-    print("[agent] ready", flush=True)
+    print(f"[agent] {_VOICE_FRAMEWORK} ready", flush=True)
     return client
 
 

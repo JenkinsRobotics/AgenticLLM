@@ -257,10 +257,13 @@ def _decide_with_history(client, base_messages: list[dict[str, str]], extra_mess
     )
 
 
-def _run_main(client, user_text: str, default_mode: str) -> None:
-    """Multi-step agent loop. Each step: decide -> tool -> append <tool_response>
-    -> next step. Stops on {"final":"..."}-style answer, max_steps, or
-    same-tool-twice loop detection.
+def _run_collect(client, user_text: str, default_mode: str) -> dict[str, Any]:
+    """Multi-step agent loop that returns a structured summary. Callers
+    print/log/return however they want (`run_command` prints; `run_for_voice`
+    returns structured for the voice loop).
+
+    Returned keys: final_answer, steps, first_decision_raw, first_decision_dict,
+    first_parse_fallback, report (LatencyReport).
     """
     total_started = time.perf_counter()
     configured_max = max(1, int(_pipeline.get("max_steps", 4) or 4))
@@ -289,9 +292,14 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
             decision_result = _decide_with_history(client, base_messages, extra)
         except Exception as exc:
             total = time.perf_counter() - total_started
-            print(f"LLM request failed: {exc}")
-            print_latency(LatencyReport(0.0, 0.0, 0.0, 0.0, 0.0, total))
-            return
+            return {
+                "final_answer": f"(LLM request failed: {exc})",
+                "steps": steps,
+                "first_decision_raw": first_decision_raw,
+                "first_decision_dict": first_decision_dict,
+                "first_parse_fallback": first_parse_fallback,
+                "report": LatencyReport(0.0, 0.0, 0.0, 0.0, 0.0, total),
+            }
 
         decision_total += decision_result.latency_s
         if step_idx == 0:
@@ -302,10 +310,14 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
             decision = parse_decision(decision_result.text)
         except Exception as exc:
             total = time.perf_counter() - total_started
-            print(f"Decision parse failed at step {step_idx+1}: {exc}")
-            print(f"Raw model output: {decision_result.text}")
-            print_latency(LatencyReport(decision_total, decision_first_ttft, tool_total, 0.0, 0.0, total))
-            return
+            return {
+                "final_answer": f"(decision parse failed at step {step_idx+1}: {exc})",
+                "steps": steps,
+                "first_decision_raw": first_decision_raw,
+                "first_decision_dict": first_decision_dict,
+                "first_parse_fallback": first_parse_fallback,
+                "report": LatencyReport(decision_total, decision_first_ttft, tool_total, 0.0, 0.0, total),
+            }
 
         if step_idx == 0:
             first_decision_dict = asdict(decision)
@@ -382,7 +394,22 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
         final_ttft=final_ttft,
         total=total,
     )
-    print(final_answer)
+    return {
+        "final_answer": final_answer,
+        "steps": steps,
+        "first_decision_raw": first_decision_raw,
+        "first_decision_dict": first_decision_dict,
+        "first_parse_fallback": first_parse_fallback,
+        "report": report,
+    }
+
+
+def _run_main(client, user_text: str, default_mode: str) -> None:
+    """CLI/bench path: collect a run, print, write the latency log."""
+    summary = _run_collect(client, user_text, default_mode)
+    steps = summary["steps"]
+    report = summary["report"]
+    print(summary["final_answer"])
     print_latency(report)
     if len(steps) > 1:
         print(f"  (chained {len(steps)} tool calls)")
@@ -390,16 +417,92 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
     write_log(
         {
             "user": user_text,
-            "decision_raw": first_decision_raw,
-            "decision": first_decision_dict,
-            "parse_fallback": first_parse_fallback,
+            "decision_raw": summary["first_decision_raw"],
+            "decision": summary["first_decision_dict"],
+            "parse_fallback": summary["first_parse_fallback"],
             "steps": steps,
             "steps_taken": len(steps),
-            "answer": final_answer,
+            "answer": summary["final_answer"],
             "mode": default_mode,
             "latency": asdict(report),
         }
     )
+
+
+# ============================================================================
+# run_for_voice — same surface as python_pydantic_ai.run_for_voice so
+# voice_assistant.py can swap frameworks transparently for A/B comparison.
+# ============================================================================
+def run_for_voice(client, user_text: str) -> dict[str, Any]:
+    """Voice-loop entry point. Returns the same structured dict as
+    python_pydantic_ai.run_for_voice — text, tool_activity, spoke_via_tool,
+    elapsed_s — so the voice loop can drop hermes_xml in as a swap-in agent.
+    """
+    lock = _pipeline["llm_lock"]
+    started = time.perf_counter()
+    try:
+        if lock is not None:
+            with lock:
+                summary = _run_collect(client, user_text, "auto")
+        else:
+            summary = _run_collect(client, user_text, "auto")
+    except Exception as exc:
+        return {
+            "text": "",
+            "error": str(exc),
+            "tool_activity": [],
+            "spoke_via_tool": False,
+            "elapsed_s": time.perf_counter() - started,
+        }
+
+    elapsed = time.perf_counter() - started
+    text = (summary["final_answer"] or "").strip()
+    steps = summary["steps"]
+
+    tool_activity: list[str] = []
+    spoke_via_tool = False
+    for s in steps:
+        dec = s["decision"]
+        tool_name = dec.get("tool") or ""
+        args = dec.get("args") or {}
+        tool_result = s.get("tool_result") or {}
+        if tool_name in ("speak", "speak_file") and isinstance(tool_result, dict) and tool_result.get("spoken") is True:
+            spoke_via_tool = True
+            spoken_text = tool_result.get("text") or ""
+            chars = tool_result.get("chars", 0)
+            secs = tool_result.get("seconds", 0)
+            if spoken_text:
+                tool_activity.append(f"  🔊 {spoken_text}\n  (spoke {chars} chars in {secs}s)")
+            else:
+                tool_activity.append(f"  🔊 (spoke {chars} chars in {secs}s)")
+        else:
+            args_repr = ""
+            if isinstance(args, dict) and args:
+                args_repr = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2])
+                if len(args_repr) > 60:
+                    args_repr = args_repr[:57] + "..."
+            tool_activity.append(f"  ▸ {tool_name}({args_repr})")
+
+    write_log(
+        {
+            "user": user_text,
+            "decision_raw": summary["first_decision_raw"],
+            "decision": summary["first_decision_dict"],
+            "parse_fallback": summary["first_parse_fallback"],
+            "steps": steps,
+            "steps_taken": len(steps),
+            "answer": text,
+            "mode": "voice",
+            "latency": asdict(summary["report"]),
+        }
+    )
+
+    return {
+        "text": text,
+        "tool_activity": tool_activity,
+        "spoke_via_tool": spoke_via_tool,
+        "elapsed_s": elapsed,
+    }
 
 
 def cli_loop(client, mode: str) -> int:
