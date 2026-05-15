@@ -1,0 +1,41 @@
+# Hermes-Agent config for the AgenticLLM project — fully offline LLM
+# (Gemma 4 26B-A4B served locally via llama-cpp-python) while still letting
+# the agent use online tools (web search, fetch, etc.) like our other three
+# frameworks do.
+#
+# Copy this file to ~/.hermes/cli-config.yaml, or symlink it:
+#   ln -sf "$(pwd)/python_hermes_agent/cli-config.yaml" ~/.hermes/cli-config.yaml
+
+model:
+  default: "gemma-4-26b-a4b"
+  # "custom" is the alias for any OpenAI-compatible local server.
+  # llama-cpp-python's server (started by ./start_llm.sh on port 11435)
+  # is exactly that, hosted at /v1 like OpenAI's API.
+  provider: "custom"
+  base_url: "http://127.0.0.1:11435/v1"
+  # Local server doesn't enforce auth but the SDK still wants a token.
+  api_key: "local"
+  # Gemma 4 was trained on 256K context but we serve with n_ctx=8192 to
+  # match our other frameworks. Tell hermes-agent so it compresses history
+  # at the right boundary instead of trusting auto-detection (which can
+  # over-shoot when /v1/models doesn't advertise a context length).
+  context_length: 8192
+
+# Inference defaults — match how our other frameworks call Gemma.
+defaults:
+  temperature: 0.0
+  top_p: 0.95
+
+# Toolsets enabled by default for the comparison demo. Web + terminal is
+# enough to mirror what our frameworks do (web_search, file ops, etc.);
+# the messaging/cron/skills systems are off because the bench is a
+# one-shot harness, not a long-running agent.
+toolsets:
+  enabled:
+    - web
+    - terminal
+    - files
+
+# Suppress the interactive banner so single-prompt runs stay parseable.
+ui:
+  quiet: true

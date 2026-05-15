@@ -2,3 +2,7 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# NousResearch/hermes-agent is cloned by python_hermes_agent/setup.sh — too
+# large to vendor (~214 MB) and re-derivable from the public repo.
+python_hermes_agent/upstream/

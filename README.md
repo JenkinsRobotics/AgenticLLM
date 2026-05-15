@@ -1,30 +1,40 @@
 # AgenticLLM
 
-A fast local agentic LLM harness on macOS. **Three frameworks**, all running the same local Gemma 4 26B-A4B model on the same 19+ tools:
+A fast local agentic LLM harness on macOS. **Four agents**, all running the same local Gemma 4 26B-A4B model — the first three on the same hand-rolled 19-tool surface, the fourth wrapping the full NousResearch hermes-agent framework with its 40+ built-in tools:
 
-| Framework | Approach | Latest TOTAL | Notes |
-|---|---|---:|---|
-| **`python_pydantic_ai/`** ⭐ | Production [Pydantic AI](https://github.com/pydantic/pydantic-ai) library with a custom in-process llama-cpp-python `Model` adapter | **49.05s** | Currently fastest; type-safe tool I/O; automatic retries on bad model output |
-| `python_hermes_xml/` | Our Nous Function-Calling XML format | 58.22s | Hand-rolled, unconstrained decode |
-| `python_custom_json/` | Our JSON + GBNF-grammar | 65.74s | Hand-rolled, strict grammar |
+| Agent | Approach | Tool surface | Loop |
+|---|---|---|---|
+| **`python_pydantic_ai/`** ⭐ | Production [Pydantic AI](https://github.com/pydantic/pydantic-ai) with custom in-process llama-cpp-python `Model` adapter | our 19 typed tools | iter() with skip-final intercept |
+| `python_hermes_xml/` | Hand-rolled Nous Function-Calling XML format | our 19 tools | `decide → tool → finalize` |
+| `python_custom_json/` | Hand-rolled JSON + GBNF-grammar-constrained decode | our 19 tools | `decide → tool → finalize` |
+| **`python_hermes_agent/`** 🆕 | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) wired to a local llama-cpp-python OpenAI-compat server | hermes' **40+ tools** (web/terminal/file/code/vision/tts/skills/cron/messaging/computer-use…) | hermes' self-improving agent loop |
 
-Latest bench totals across the 20 default prompts. See [BENCHMARK.md](BENCHMARK.md) for the live numbers (auto-updated).
+The first three load the model in-process and answer to a strict per-prompt latency budget (warm-cache routing in 0.3–0.5 s). The fourth runs the model behind an HTTP boundary so a much larger, self-improving agent system can drive it — same offline LLM, very different agent philosophy.
 
-**Why Pydantic AI is the recommendation:** type-safe tool arguments via Pydantic models (critical for robot/hardware commands — bad coords get rejected before they hit motors), automatic `ModelRetry` when validation fails, active development from the Pydantic team. And after tightening the post-tool summary prompt to "shortest possible reply", it became the fastest of the three on raw throughput too.
+See [docs/FRAMEWORKS.md](docs/FRAMEWORKS.md) for a side-by-side breakdown, [BENCHMARK.md](BENCHMARK.md) for the live 3-way latency table (auto-updated for the in-process trio), and [BENCHMARK_4WAY.md](BENCHMARK_4WAY.md) for the curated 5-prompt run that includes `python_hermes_agent` head-to-head.
 
-The goal is to maximize fast local realtime agentic performance and surface where prompt design + output format actually matter for tool-calling latency.
+**Why each one is useful:**
+- **`python_pydantic_ai`** is our recommendation for the robot agent: type-safe tool arguments (bad coords get rejected before they hit motors), automatic `ModelRetry` on bad output, and the skip-final optimization makes simple commands 3× faster than the others. This is what `voice_assistant.py` defaults to.
+- **`python_hermes_xml`** is the hand-rolled reference for the Hermes function-calling format that the underlying Hermes model series was trained on. Also wired as a swap-in for `voice_assistant.py` (`VOICE_FRAMEWORK=hermes_xml`).
+- **`python_custom_json`** demonstrates strict grammar-constrained tool routing — useful when the model is small or untrusted and you need format guarantees.
+- **`python_hermes_agent`** is the full Nous framework — lets us compare against a real agent OS (skills, cron, messaging gateway, subagent delegation) using the *same* local Gemma weights, so any quality gap is purely an agent-architecture gap, not a model gap.
 
-## What's in the box
+The goal is to maximize fast local realtime agentic performance and surface where prompt design + output format + agent architecture actually matter for tool-calling latency and reliability.
 
-| | `python_custom_json/` | `python_hermes_xml/` |
-|---|---|---|
-| Tool-call format | Bare JSON: `{"tool":"x","args":{...}}` | XML: `<tool_call>{"name":"x","arguments":{...}}</tool_call>` |
-| Tool declarations | Plain-text list in system prompt | JSON Schema in `<tools>` block |
-| Decoding | GBNF grammar-constrained | Unconstrained |
-| Tool result round-trip | Appended user turn: `Tool result: ...` | `<tool_response>{...}</tool_response>` turn |
-| Strength | Hard format guarantee; cheaper cold start | Faster warm decode; cleaner free-text |
+## What's in the box (the three in-process frameworks)
 
-Both share the same model, the same tool implementations, the same `LlamaCppPythonClient` plumbing, and the same latency reporting format. The only things that differ are `prompts.py`, `tool_router.py`, and the `decide` / `finalize` call shapes in `main.py`.
+| | `python_custom_json/` | `python_hermes_xml/` | `python_pydantic_ai/` |
+|---|---|---|---|
+| Tool-call format | Bare JSON: `{"tool":"x","args":{...}}` | XML: `<tool_call>{"name":"x","arguments":{...}}</tool_call>` | pydantic-ai's typed `Tool` decorators |
+| Tool declarations | Plain-text list in system prompt | JSON Schema in `<tools>` block | inferred from function signatures + docstrings |
+| Decoding | GBNF grammar-constrained | Unconstrained | OpenAI-style tool-calls, with drift recovery |
+| Tool result round-trip | Appended user turn: `Tool result: ...` | `<tool_response>{...}</tool_response>` turn | structured `ToolReturnPart` |
+| Skip-final-LLM | manual `fast` mode | `decision.mode=fast` | `SKIP_FINAL_TOOLS` set, intercept via `agent.iter()` |
+| Strength | Hard format guarantee; cheaper cold start | Faster warm decode; cleaner free-text | Type-safe args; auto-retry; fastest warm-cache |
+
+All three share the same model, the same tool implementations, the same `LlamaCppPythonClient` plumbing, and the same latency reporting format. The differences live in `prompts.py`, `tool_router.py`, the `decide` / `finalize` shapes, and (for pydantic_ai) the `agent.iter()` skip-final intercept.
+
+The fourth framework (`python_hermes_agent/`) is its own self-contained world — see [its README](python_hermes_agent/README.md) for setup and design.
 
 ## Setup
 
@@ -154,9 +164,21 @@ AgenticLLM/
 │   ├── logs/            # latency.jsonl (append-only history)
 │   └── workspace/       # Sandboxed file ops
 ├── python_hermes_xml/  # OUR Nous Function-Calling XML format framework (was "hermes/")
-# pygentic/             # PENDING — real ruvnet/pygentic library wrapper
-# hermes_agent/         # PENDING — real nousresearch/hermes-agent wrapper
-├── memory/             # Unified memory — shared across all interfaces
+├── python_pydantic_ai/ # Pydantic AI wrapper with custom LlamaCppModel adapter
+│   ├── main.py          # build_agent / run_command / run_for_voice / iter() skip-final
+│   ├── llm_model.py     # LlamaCppModel — in-process Gemma as a pydantic-ai Model
+│   ├── tools.py         # Same 19 tools (shared semantics with the other two)
+│   ├── prompts.py       # System prompt
+│   └── workspace/, logs/
+├── python_hermes_agent/ # NousResearch hermes-agent wired to local Gemma over HTTP
+│   ├── setup.sh         # clones upstream/, pip-installs, links cli-config.yaml
+│   ├── start_llm.sh     # serves Gemma via llama_cpp.server on :11435
+│   ├── cli-config.yaml  # hermes config: provider=custom, base_url=local
+│   ├── run_prompt.py    # one-shot wrapper that mirrors our run_for_voice shape
+│   ├── README.md        # demo quickstart
+│   └── upstream/        # the cloned framework (gitignored — re-derived by setup.sh)
+├── voice_assistant.py  # AEC + barge-in voice loop; framework swappable via VOICE_FRAMEWORK
+├── memory/             # Unified memory — shared across the first three frameworks
 │   ├── identity.md      # Stable persona, prepended to every system prompt
 │   ├── facts.json       # Atomic key/value scratchpad
 │   └── memory_module.py # Shared read/write helpers
@@ -181,12 +203,14 @@ The latency reports in `latency.jsonl` carry TTFT + total time per stage so you 
 
 ## Docs
 
+- [docs/FRAMEWORKS.md](docs/FRAMEWORKS.md) — full side-by-side of all four agents, when to use which
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, request pipeline, framework differences
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — running benchmarks, reading history, regression detection
 - [docs/BENCH_RESULTS.md](docs/BENCH_RESULTS.md) — latest numbers per mode + historical consistency view
 - [docs/PROJECT.md](docs/PROJECT.md) — high-level project overview
 - [docs/SETUP.md](docs/SETUP.md) — install and verification
 - [docs/TODO.md](docs/TODO.md) — open work
+- [python_hermes_agent/README.md](python_hermes_agent/README.md) — NousResearch hermes-agent demo: install, local-LLM wiring, comparison framing
 
 ## License
 
