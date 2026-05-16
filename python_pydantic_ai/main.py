@@ -70,6 +70,9 @@ SKIP_FINAL_TOOLS = frozenset({
     # heard it. Asking the LLM to add "OK." costs ~280ms for no benefit.
     "speak",
     "speak_file",
+    # ask_user IS the final turn — the question is the answer, the next
+    # phrase from the user is the next turn's input.
+    "ask_user",
 })
 
 
@@ -128,6 +131,12 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if result.get("spoken") is True:
             return ""
         return f"Couldn't speak: {result.get('reason', 'unknown')}"
+    if name == "ask_user":
+        # The question IS the final answer this turn — the voice loop will
+        # speak it and the user's next phrase becomes the answer next turn.
+        if result.get("asked") is True:
+            return str(result.get("question") or "")
+        return "(no question to ask)"
     return str(result)
 
 
@@ -287,9 +296,16 @@ def build_agent(
         return tools.append_file(path=path, content=content)
 
     @agent.tool_plain
-    def delete_file(path: str) -> dict:
-        """Delete a file from the workspace."""
-        return tools.delete_file(path=path)
+    def delete_file(path: str, confirm: bool = False) -> dict:
+        """Delete a file from the workspace.
+
+        In voice / production mode (env DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1)
+        you must first call this without `confirm` to get a preview, ask
+        the user via `ask_user`, then call again with `confirm=True`.
+        In default / bench mode `confirm` is ignored and deletion is
+        immediate.
+        """
+        return tools.delete_file(path=path, confirm=confirm)
 
     @agent.tool_plain
     def read_file(path: str) -> dict:
@@ -305,6 +321,95 @@ def build_agent(
     def system_status() -> dict:
         """Get current machine status (cpu, disk, load average)."""
         return tools.system_status()
+
+    @agent.tool_plain
+    def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict:
+        """Schedule a prompt for unattended execution on a cron expression.
+
+        Examples:
+          "0 7 * * *"         — every day at 7 AM
+          "*/10 * * * *"      — every 10 minutes
+          "0 9 * * MON-FRI"   — 9 AM on weekdays
+        The schedule fires in the same agent loop a fresh user turn would.
+        """
+        return tools.schedule_prompt(cron_expr=cron_expr, prompt=prompt, name=name)
+
+    @agent.tool_plain
+    def list_schedules() -> dict:
+        """List every active scheduled prompt with its next-run timestamp."""
+        return tools.list_schedules()
+
+    @agent.tool_plain
+    def cancel_schedule(name: str) -> dict:
+        """Cancel a previously-scheduled prompt by name."""
+        return tools.cancel_schedule(name=name)
+
+    @agent.tool_plain
+    def search_memory(query: str, k: int = 5) -> dict:
+        """Semantic search over the cross-session episodic log.
+
+        Returns the past user/assistant turns most relevant to `query`.
+        Use this when `recall` (exact-key) is too narrow — natural
+        questions like "what did we talk about yesterday?" or "what's my
+        dog's name?" go through this tool.
+        """
+        return tools.search_memory(query=query, k=k)
+
+    @agent.tool_plain
+    def ask_user(question: str) -> dict:
+        """Ask the user a clarifying question instead of guessing.
+
+        Use this whenever the request is ambiguous — missing names, unclear
+        pronouns ("open it" / "delete that"), missing destinations, two
+        plausible interpretations. The voice loop speaks the question and
+        waits for the user's next phrase as the answer.
+        """
+        return tools.ask_user(question=question)
+
+    @agent.tool_plain
+    def generate_image(
+        prompt: str,
+        out_path: str = "generated.png",
+        num_inference_steps: int = 1,
+        guidance_scale: float = 0.0,
+        seed: int | None = None,
+    ) -> dict:
+        """Generate an image from a text prompt and save it in the workspace.
+
+        Uses a local SDXL-Turbo pipeline (no internet at inference time).
+        First call lazy-downloads ~6 GB of weights; subsequent calls are
+        ~1–3 s per image on Apple Silicon. `out_path` is workspace-relative.
+        """
+        return tools.generate_image(
+            prompt=prompt,
+            out_path=out_path,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            seed=seed,
+        )
+
+    @agent.tool_plain
+    def look_at(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
+        """Look at a workspace image file and answer a question about it.
+
+        Use this when the user references a photo, screenshot, or anything
+        they want you to *see*. `image_path` is workspace-relative. The
+        first call lazy-loads a small local vision model (~1.9 B params);
+        subsequent calls are fast.
+        """
+        return tools.look_at(image_path=image_path, question=question)
+
+    @agent.tool_plain
+    def run_python(code: str, timeout_s: float = 10.0) -> dict:
+        """Execute a snippet of Python in a sandboxed subprocess.
+
+        Use this for novel problems that don't have a dedicated tool:
+        non-trivial math, data wrangling, regex on a string, parsing a
+        chunk of JSON the user pasted, etc. The snippet runs in a fresh
+        interpreter with a 10-second timeout and an isolated temp dir.
+        Print the answer to stdout — the tool result captures stdout.
+        """
+        return tools.run_python(code=code, timeout_s=timeout_s)
 
     @agent.tool_plain
     def calculate(expression: str) -> dict:
@@ -342,9 +447,13 @@ def build_agent(
         return tools.recall(key=key)
 
     @agent.tool_plain
-    def forget(key: str) -> dict:
-        """Remove a stored fact by key."""
-        return tools.forget(key=key)
+    def forget(key: str, confirm: bool = False) -> dict:
+        """Remove a stored fact by key.
+
+        Same approval semantics as delete_file when
+        DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1.
+        """
+        return tools.forget(key=key, confirm=confirm)
 
     @agent.tool_plain
     def list_facts() -> dict:

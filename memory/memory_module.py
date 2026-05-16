@@ -16,6 +16,8 @@ future interface (voice, Discord, etc.) sees the same memory.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -28,13 +30,39 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 IDENTITY_PATH = ROOT / "identity.md"
 FACTS_PATH = ROOT / "facts.json"
+FACTS_LOCK_PATH = ROOT / ".facts.lock"
 EPISODIC_PATH = ROOT / "episodic.jsonl"
 
+# Schema version for facts.json. Bump when the on-disk shape changes; old
+# files are migrated transparently in `_read_facts` so existing installs
+# never need a manual fix-up step.
+SCHEMA_VERSION = 1
 
-# In-process lock around facts.json writes. Cross-process writes are still
-# safe via atomic rename; the lock just prevents one Python process from
-# racing with itself if two threads call remember() concurrently.
+
+# In-process lock around facts.json writes. Cross-process safety is
+# provided by `_facts_file_lock()` (fcntl flock), which serializes any
+# process touching the same file regardless of how many threads each has.
 _facts_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _facts_file_lock(exclusive: bool = True) -> Any:
+    """fcntl-backed advisory lock keyed on a dedicated lockfile.
+
+    We don't lock facts.json itself because we rewrite it via atomic
+    rename — the inode flips out from under any reader. A separate
+    lockfile stays put across renames, so two writers from different
+    processes serialize cleanly.
+    """
+    FACTS_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    flag = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+    with open(FACTS_LOCK_PATH, "a+", encoding="utf-8") as fh:
+        try:
+            fcntl.flock(fh.fileno(), flag)
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def load_identity() -> str:
@@ -43,24 +71,48 @@ def load_identity() -> str:
     return IDENTITY_PATH.read_text(encoding="utf-8").strip()
 
 
-def _read_facts() -> dict[str, Any]:
+def _migrate_facts_shape(data: Any) -> dict[str, str]:
+    """Accept any historical or current shape; return the facts dict.
+
+    v0: flat {"key": "value", ...}
+    v1: {"schema_version": 1, "facts": {"key": "value", ...}}
+    """
+    if not isinstance(data, dict):
+        return {}
+    if "schema_version" in data and isinstance(data.get("facts"), dict):
+        return {k: v for k, v in data["facts"].items() if isinstance(k, str)}
+    # v0 — flat shape. Treat every key as a fact, but drop reserved/private
+    # keys that look like metadata so a future v2 doesn't collide.
+    return {k: v for k, v in data.items() if isinstance(k, str) and not k.startswith("_")}
+
+
+def _read_facts_locked() -> dict[str, str]:
+    """Read facts.json without taking the flock (caller already holds it)."""
     if not FACTS_PATH.exists():
         return {}
     try:
         data = json.loads(FACTS_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
+    return _migrate_facts_shape(data)
 
 
-def _write_facts_atomic(facts: dict[str, Any]) -> None:
+def _read_facts() -> dict[str, str]:
+    if not FACTS_PATH.exists():
+        return {}
+    with _facts_file_lock(exclusive=False):
+        return _read_facts_locked()
+
+
+def _write_facts_atomic(facts: dict[str, str]) -> None:
     FACTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"schema_version": SCHEMA_VERSION, "facts": dict(facts)}
     fd, tmp_path = tempfile.mkstemp(
         dir=FACTS_PATH.parent, prefix=".facts.", suffix=".tmp"
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(facts, handle, indent=2, ensure_ascii=True, sort_keys=True)
+            json.dump(payload, handle, indent=2, ensure_ascii=True, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, FACTS_PATH)
@@ -73,8 +125,8 @@ def _write_facts_atomic(facts: dict[str, Any]) -> None:
 
 
 def remember(key: str, value: str) -> None:
-    with _facts_lock:
-        facts = _read_facts()
+    with _facts_lock, _facts_file_lock(exclusive=True):
+        facts = _read_facts_locked()
         facts[key] = value
         _write_facts_atomic(facts)
 
@@ -133,8 +185,8 @@ def recall(key: str) -> str | None:
 
 
 def forget(key: str) -> bool:
-    with _facts_lock:
-        facts = _read_facts()
+    with _facts_lock, _facts_file_lock(exclusive=True):
+        facts = _read_facts_locked()
         if key not in facts:
             return False
         del facts[key]
@@ -155,6 +207,297 @@ def append_episodic(entry: dict[str, Any]) -> None:
     EPISODIC_PATH.parent.mkdir(parents=True, exist_ok=True)
     with EPISODIC_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+
+
+# ----------------------------------------------------------------------------
+# Semantic search over episodic.jsonl. Lazy-loaded sentence-transformers
+# index; rebuilt automatically when the jsonl line-count drifts from the
+# cached embeddings. Zero perf cost when never called.
+# ----------------------------------------------------------------------------
+EMBED_PATH = ROOT / "episodic.embeddings.npz"
+EMBED_MODEL_ID = os.environ.get("SEMANTIC_MEMORY_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+_semantic_state: dict[str, Any] = {
+    "model": None,
+    "model_id": None,
+    "vectors": None,        # (N, dim) float32 numpy array
+    "entries": None,        # list of (user, answer, timestamp) tuples, len N
+    "indexed_lines": 0,     # how many jsonl lines we've indexed
+}
+
+
+def _ensure_semantic_model() -> Any:
+    if _semantic_state["model"] is not None and _semantic_state["model_id"] == EMBED_MODEL_ID:
+        return _semantic_state["model"]
+    from sentence_transformers import SentenceTransformer
+
+    import time as _t
+    started = _t.perf_counter()
+    model = SentenceTransformer(EMBED_MODEL_ID)
+    print(f"[semantic-memory] {EMBED_MODEL_ID} loaded in {_t.perf_counter() - started:.1f}s", flush=True)
+    _semantic_state["model"] = model
+    _semantic_state["model_id"] = EMBED_MODEL_ID
+    return model
+
+
+def _episodic_lines() -> int:
+    if not EPISODIC_PATH.exists():
+        return 0
+    with EPISODIC_PATH.open("rb") as fh:
+        return sum(1 for _ in fh)
+
+
+def _load_or_build_index() -> tuple[Any, list[tuple[str, str, str]]]:
+    """Return (vectors_ndarray, entries_list). Rebuild if cache is stale."""
+    import numpy as np
+
+    target_lines = _episodic_lines()
+    cached_lines = _semantic_state.get("indexed_lines", 0)
+    if (
+        _semantic_state["vectors"] is not None
+        and _semantic_state["entries"] is not None
+        and cached_lines == target_lines
+    ):
+        return _semantic_state["vectors"], _semantic_state["entries"]
+
+    # Try the on-disk cache first
+    if EMBED_PATH.exists():
+        try:
+            data = np.load(EMBED_PATH, allow_pickle=True)
+            if int(data["lines"]) == target_lines:
+                _semantic_state["vectors"] = data["vectors"]
+                _semantic_state["entries"] = list(data["entries"].tolist())
+                _semantic_state["indexed_lines"] = target_lines
+                return _semantic_state["vectors"], _semantic_state["entries"]
+        except Exception:
+            pass
+
+    # Rebuild from scratch
+    entries: list[tuple[str, str, str]] = []
+    texts: list[str] = []
+    if EPISODIC_PATH.exists():
+        with EPISODIC_PATH.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                user = (e.get("user") or "").strip()
+                answer = (e.get("answer") or "").strip()
+                ts = (e.get("timestamp") or "").strip()
+                if not user and not answer:
+                    continue
+                entries.append((user, answer, ts))
+                texts.append(f"USER: {user}\nASSISTANT: {answer}".strip())
+
+    if not entries:
+        _semantic_state["vectors"] = None
+        _semantic_state["entries"] = []
+        _semantic_state["indexed_lines"] = target_lines
+        return None, []
+
+    model = _ensure_semantic_model()
+    vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    vectors = np.asarray(vectors, dtype="float32")
+    _semantic_state["vectors"] = vectors
+    _semantic_state["entries"] = entries
+    _semantic_state["indexed_lines"] = target_lines
+
+    try:
+        np.savez(
+            EMBED_PATH,
+            vectors=vectors,
+            entries=np.array(entries, dtype=object),
+            lines=np.int64(target_lines),
+        )
+    except Exception:
+        pass  # cache is best-effort
+    return vectors, entries
+
+
+def search_memory(query: str, k: int = 5) -> list[dict[str, Any]]:
+    """Return up to k semantically-closest episodic entries for `query`.
+
+    Each result has user / answer / timestamp / score (cosine, 0-1). The
+    index is built lazily on first call from episodic.jsonl and cached on
+    disk; subsequent calls reuse the cache until the jsonl line-count
+    changes, at which point a rebuild is triggered transparently.
+    """
+    import numpy as np
+
+    clean = (query or "").strip()
+    if not clean:
+        return []
+    vectors, entries = _load_or_build_index()
+    if vectors is None or not entries:
+        return []
+
+    model = _ensure_semantic_model()
+    q_vec = np.asarray(
+        model.encode([clean], normalize_embeddings=True, show_progress_bar=False),
+        dtype="float32",
+    )[0]
+    scores = vectors @ q_vec  # cosine sim because all rows are unit-normed
+    top_idx = scores.argsort()[::-1][: max(1, k)]
+    out: list[dict[str, Any]] = []
+    for i in top_idx:
+        user, answer, ts = entries[int(i)]
+        out.append({
+            "user": user,
+            "answer": answer,
+            "timestamp": ts,
+            "score": float(scores[int(i)]),
+        })
+    return out
+
+
+# ----------------------------------------------------------------------------
+# Cron-style scheduling for prompts the agent runs unattended.
+# Storage = memory/schedules.jsonl (append-only); we mark a row as cancelled
+# instead of mutating it so the log stays linear and auditable.
+# ----------------------------------------------------------------------------
+SCHEDULES_PATH = ROOT / "schedules.jsonl"
+SCHEDULES_LOCK_PATH = ROOT / ".schedules.lock"
+
+
+@contextlib.contextmanager
+def _schedules_file_lock() -> Any:
+    SCHEDULES_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(SCHEDULES_LOCK_PATH, "a+", encoding="utf-8") as fh:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _read_schedules_raw() -> list[dict[str, Any]]:
+    if not SCHEDULES_PATH.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with SCHEDULES_PATH.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def _live_schedules(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Reduce the append-only log to a name → latest-active-row map. A row
+    with `cancelled=True` removes that name from the active set."""
+    by_name: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = row.get("name")
+        if not name:
+            continue
+        if row.get("cancelled"):
+            by_name.pop(name, None)
+        else:
+            by_name[name] = row
+    return by_name
+
+
+def add_schedule(cron_expr: str, prompt: str, name: str | None = None) -> dict[str, Any]:
+    """Schedule a prompt for unattended execution on a cron expression.
+
+    `cron_expr` is standard 5-field cron ("0 7 * * *" for 7am daily).
+    Returns the persisted row including a `next_run_at` derived from now.
+    """
+    from datetime import datetime, timezone
+
+    from croniter import croniter
+
+    cron_expr = (cron_expr or "").strip()
+    prompt = (prompt or "").strip()
+    if not cron_expr or not prompt:
+        raise ValueError("cron_expr and prompt are required")
+    if not croniter.is_valid(cron_expr):
+        raise ValueError(f"invalid cron expression: {cron_expr!r}")
+
+    now = datetime.now(timezone.utc)
+    nxt = croniter(cron_expr, now).get_next(datetime)
+    name = (name or f"sched_{int(now.timestamp())}").strip()
+
+    row = {
+        "name": name,
+        "cron": cron_expr,
+        "prompt": prompt,
+        "created_at": now.isoformat(timespec="seconds"),
+        "next_run_at": nxt.isoformat(timespec="seconds"),
+        "last_run_at": None,
+        "cancelled": False,
+    }
+    SCHEDULES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _schedules_file_lock(), SCHEDULES_PATH.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=True) + "\n")
+    return row
+
+
+def list_schedules() -> list[dict[str, Any]]:
+    return list(_live_schedules(_read_schedules_raw()).values())
+
+
+def cancel_schedule(name: str) -> bool:
+    name = (name or "").strip()
+    if not name:
+        return False
+    with _schedules_file_lock():
+        live = _live_schedules(_read_schedules_raw())
+        if name not in live:
+            return False
+        from datetime import datetime, timezone
+        row = {
+            "name": name,
+            "cancelled": True,
+            "cancelled_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        with SCHEDULES_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=True) + "\n")
+    return True
+
+
+def due_schedules(now: Any = None) -> list[dict[str, Any]]:
+    """Return live schedules whose `next_run_at` has passed."""
+    from datetime import datetime, timezone
+
+    now = now or datetime.now(timezone.utc)
+    if hasattr(now, "isoformat"):
+        cutoff = now.isoformat(timespec="seconds")
+    else:
+        cutoff = str(now)
+    return [
+        row for row in _live_schedules(_read_schedules_raw()).values()
+        if (row.get("next_run_at") or "") <= cutoff
+    ]
+
+
+def mark_schedule_ran(name: str) -> None:
+    """Record that `name` ran just now and recompute its next_run_at."""
+    from datetime import datetime, timezone
+
+    from croniter import croniter
+
+    with _schedules_file_lock():
+        live = _live_schedules(_read_schedules_raw())
+        sched = live.get(name)
+        if not sched:
+            return
+        now = datetime.now(timezone.utc)
+        nxt = croniter(sched["cron"], now).get_next(datetime)
+        update = {
+            "name": name,
+            "cron": sched["cron"],
+            "prompt": sched["prompt"],
+            "created_at": sched["created_at"],
+            "next_run_at": nxt.isoformat(timespec="seconds"),
+            "last_run_at": now.isoformat(timespec="seconds"),
+            "cancelled": False,
+        }
+        with SCHEDULES_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(update, ensure_ascii=True) + "\n")
 
 
 def load_recent_turns(n: int = 5) -> list[dict[str, str]]:

@@ -1,8 +1,11 @@
 {
-  "preference_espresso": "user likes espresso",
-  "preferred youtube video length": "90 seconds",
-  "preferred_youtube_video_length": "90 seconds",
-  "prefers_speech": "true",
-  "user_preference": "Always speak responses aloud",
-  "user_preference_ui_mode": "dark mode"
+  "facts": {
+    "preference_espresso": "user likes espresso",
+    "preferred youtube video length": "90 seconds",
+    "preferred_youtube_video_length": "90 seconds",
+    "prefers_speech": "true",
+    "user_preference": "Always speak responses aloud",
+    "user_preference_ui_mode": "dark mode"
+  },
+  "schema_version": 1
 }

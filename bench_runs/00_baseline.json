@@ -1,0 +1,61 @@
+{
+  "prompts": [
+    "what time is it",
+    "calculate 47 times 23 plus 12",
+    "tell me a one sentence story about a robot",
+    "search the web for recent news about local llms",
+    "list files in the workspace directory"
+  ],
+  "results": {
+    "python_pydantic_ai": [
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what time is it",
+        "text": "2026-05-15 09:02:11 AM PDT",
+        "tool_activity": [
+          "  \u25b8 get_time()"
+        ],
+        "elapsed_s": 1.495140665996587,
+        "error": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "1093",
+        "tool_activity": [
+          "  \u25b8 calculate(expression='47 * 23 + 12')"
+        ],
+        "elapsed_s": 0.47563216599519365,
+        "error": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final battery cycle watching the sunset, finally understanding why humans called it beautiful.",
+        "tool_activity": [],
+        "elapsed_s": 0.4044295420026174,
+        "error": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "search the web for recent news about local llms",
+        "text": "Recent trends in local LLMs include accelerating community development, increasing ease of running capable models on consumer hardware, and growing integration into edge computing and scene analysis for deep hardware-level insights.",
+        "tool_activity": [
+          "  \u25b8 web_search(query='recent news local LLMs 2024 2025')"
+        ],
+        "elapsed_s": 4.534009709008387,
+        "error": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "list files in the workspace directory",
+        "text": "The workspace contains a directory named `self_test` and a file named `dogs_vs_robots_script.md`.",
+        "tool_activity": [
+          "  \u25b8 list_directory(path='.')"
+        ],
+        "elapsed_s": 0.8892206659947988,
+        "error": null
+      }
+    ]
+  }
+}

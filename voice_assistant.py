@@ -47,6 +47,11 @@ from scipy.signal import resample_poly
 # run_for_voice(client, text), shutdown_extensions(wait), and a tools module
 # with ensure_workspace().
 _VOICE_FRAMEWORK = os.environ.get("VOICE_FRAMEWORK", "pydantic_ai").strip()
+
+# Voice mode → robot-style production posture. Require explicit confirm=True
+# on destructive ops (delete_file, forget). The agent must call ask_user
+# first and only commit after the user authorizes that specific operation.
+os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
 _FRAMEWORK_MODULES = {
     "pydantic_ai": ("python_pydantic_ai.main", "python_pydantic_ai.tools"),
     "hermes_xml": ("python_hermes_xml.main", "python_hermes_xml.tools"),
