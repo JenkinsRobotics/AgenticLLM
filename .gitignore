@@ -6,3 +6,28 @@ __pycache__/
 # NousResearch/hermes-agent is cloned by python_hermes_agent/setup.sh — too
 # large to vendor (~214 MB) and re-derivable from the public repo.
 python_hermes_agent/upstream/
+
+# Cross-process advisory lockfiles for memory state (created on first write).
+memory/.facts.lock
+memory/.schedules.lock
+
+# Cached embeddings rebuilt on demand from episodic.jsonl.
+memory/episodic.embeddings.npz
+
+# Auto-archived old episodic entries (regenerable via maintenance).
+memory/archive/
+
+# Test cruft from voice_validation.py / smoke tests. Workspace itself is
+# kept; just don't commit the ephemeral test files.
+python_pydantic_ai/workspace/voice_val_target.txt
+python_pydantic_ai/workspace/approval_test.txt
+python_pydantic_ai/workspace/generated*.png
+
+# Per-step bench snapshots — regenerable, useful only for local triage.
+bench_runs/
+BENCHMARK_4WAY.md
+bench_all_results.json
+bench_history.jsonl
+
+# Supervisor + bench-all server logs.
+logs/

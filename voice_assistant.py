@@ -47,11 +47,6 @@ from scipy.signal import resample_poly
 # run_for_voice(client, text), shutdown_extensions(wait), and a tools module
 # with ensure_workspace().
 _VOICE_FRAMEWORK = os.environ.get("VOICE_FRAMEWORK", "pydantic_ai").strip()
-
-# Voice mode → robot-style production posture. Require explicit confirm=True
-# on destructive ops (delete_file, forget). The agent must call ask_user
-# first and only commit after the user authorizes that specific operation.
-os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
 _FRAMEWORK_MODULES = {
     "pydantic_ai": ("python_pydantic_ai.main", "python_pydantic_ai.tools"),
     "hermes_xml": ("python_hermes_xml.main", "python_hermes_xml.tools"),
@@ -412,6 +407,11 @@ def load_agent_client():
 
     init_extensions(_Args(), client)
     agent_tools.ensure_workspace()
+    # Prewarm only exists for python_pydantic_ai right now; ignore for
+    # other frameworks, which already pay this cost on their first turn.
+    prewarm_fn = getattr(_FW_MAIN, "prewarm", None)
+    if prewarm_fn is not None:
+        prewarm_fn(client)
     print(f"[agent] {_VOICE_FRAMEWORK} ready", flush=True)
     return client
 
@@ -500,6 +500,13 @@ def warm_stt(model, label: str) -> None:
 
 
 def main() -> int:
+    # Voice mode → robot-style production posture. Require explicit
+    # confirm=True on destructive ops (delete_file, forget). The agent must
+    # call ask_user first and only commit after the user authorizes the
+    # specific operation. Done here (not at module import) so simply
+    # importing voice_assistant from a test or CLI doesn't pollute env.
+    os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
+
     from pywhispercpp.model import Model as STTModel
 
     print(f"[stt-fast] loading {STT_FAST}...", flush=True)

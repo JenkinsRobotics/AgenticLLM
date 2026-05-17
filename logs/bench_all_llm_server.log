@@ -1,6 +1,6 @@
 ggml_metal_device_init: tensor API disabled for pre-M5 and pre-A19 devices
 ggml_metal_library_init: using embedded metal library
-ggml_metal_library_init: loaded in 0.022 sec
+ggml_metal_library_init: loaded in 0.021 sec
 ggml_metal_rsets_init: creating a residency set collection (keep_alive = 180 s)
 ggml_metal_device_init: GPU name:   MTL0 (Apple M2 Max)
 ggml_metal_device_init: GPU family: MTLGPUFamilyApple8  (1008)
@@ -1031,201 +1031,385 @@ sched_reserve:       MTL0 compute buffer size =   517.50 MiB
 sched_reserve:        CPU compute buffer size =    59.01 MiB
 sched_reserve: graph nodes  = 2800
 sched_reserve: graph splits = 2
-sched_reserve: reserve took 56.42 ms, sched copies = 1
+sched_reserve: reserve took 182.49 ms, sched copies = 1
 MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | ACCELERATE = 1 | REPACK = 1 | 
 Model metadata: {'general.quantization_version': '2', 'tokenizer.ggml.mask_token_id': '4', 'tokenizer.ggml.eos_token_id': '1', 'tokenizer.ggml.model': 'gemma4', 'gemma4.rope.dimension_count_swa': '256', 'gemma4.rope.dimension_count': '512', 'tokenizer.ggml.add_bos_token': 'false', 'gemma4.expert_feed_forward_length': '704', 'general.name': 'Gemma 4 26B A4B', 'gemma4.attention.sliding_window': '1024', 'general.sampling.temp': '1.000000', 'gemma4.attention.layer_norm_rms_epsilon': '0.000001', 'general.size_label': '26B-A4B', 'gemma4.attention.key_length': '512', 'gemma4.rope.freq_base_swa': '10000.000000', 'gemma4.attention.head_count': '16', 'tokenizer.chat_template': '{%- macro format_parameters(properties, required) -%}\n    {%- set standard_keys = [\'description\', \'type\', \'properties\', \'required\', \'nullable\'] -%}\n    {%- set ns = namespace(found_first=false) -%}\n    {%- for key, value in properties | dictsort -%}\n        {%- set add_comma = false -%}\n        {%- if key not in standard_keys -%}\n            {%- if ns.found_first %},{% endif -%}\n            {%- set ns.found_first = true -%}\n            {{ key }}:{\n            {%- if value[\'description\'] -%}\n                description:<|"|>{{ value[\'description\'] }}<|"|>\n                {%- set add_comma = true -%}\n            {%- endif -%}\n            {%- if value[\'nullable\'] %}\n                {%- if add_comma %},{%- else -%} {%- set add_comma = true -%} {% endif -%}\n                nullable:true\n            {%- endif -%}\n            {%- if value[\'type\'] | upper == \'STRING\' -%}\n                {%- if value[\'enum\'] -%}\n                    {%- if add_comma %},{%- else -%} {%- set add_comma = true -%} {% endif -%}\n                    enum:{{ format_argument(value[\'enum\']) }}\n                {%- endif -%}\n            {%- elif value[\'type\'] | upper == \'OBJECT\' -%}\n                ,properties:{\n                {%- if value[\'properties\'] is defined and value[\'properties\'] is mapping -%}\n                    {{- format_parameters(value[\'properties\'], value[\'required\'] | default([])) -}}\n                {%- elif value is mapping -%}\n                    {{- format_parameters(value, value[\'required\'] | default([])) -}}\n                {%- endif -%}\n                }\n                {%- if value[\'required\'] -%}\n                    ,required:[\n                    {%- for item in value[\'required\'] | default([]) -%}\n                        <|"|>{{- item -}}<|"|>\n                        {%- if not loop.last %},{% endif -%}\n                    {%- endfor -%}\n                    ]\n                {%- endif -%}\n            {%- elif value[\'type\'] | upper == \'ARRAY\' -%}\n                {%- if value[\'items\'] is mapping and value[\'items\'] -%}\n                    ,items:{\n                    {%- set ns_items = namespace(found_first=false) -%}\n                    {%- for item_key, item_value in value[\'items\'] | dictsort -%}\n                        {%- if item_value is not none -%}\n                            {%- if ns_items.found_first %},{% endif -%}\n                            {%- set ns_items.found_first = true -%}\n                            {%- if item_key == \'properties\' -%}\n                                properties:{\n                                {%- if item_value is mapping -%}\n                                    {{- format_parameters(item_value, value[\'items\'][\'required\'] | default([])) -}}\n                                {%- endif -%}\n                                }\n                            {%- elif item_key == \'required\' -%}\n                                required:[\n                                {%- for req_item in item_value -%}\n                                    <|"|>{{- req_item -}}<|"|>\n                                    {%- if not loop.last %},{% endif -%}\n                                {%- endfor -%}\n                                ]\n                            {%- elif item_key == \'type\' -%}\n                                {%- if item_value is string -%}\n                                    type:{{ format_argument(item_value | upper) }}\n                                {%- else -%}\n                                    type:{{ format_argument(item_value | map(\'upper\') | list) }}\n                                {%- endif -%}\n                            {%- else -%}\n                                {{ item_key }}:{{ format_argument(item_value) }}\n                            {%- endif -%}\n                        {%- endif -%}\n                    {%- endfor -%}\n                    }\n                {%- endif -%}\n            {%- endif -%}\n            {%- if add_comma %},{%- else -%} {%- set add_comma = true -%} {% endif -%}\n            type:<|"|>{{ value[\'type\'] | upper }}<|"|>}\n        {%- endif -%}\n    {%- endfor -%}\n{%- endmacro -%}\n{%- macro format_function_declaration(tool_data) -%}\n    declaration:{{- tool_data[\'function\'][\'name\'] -}}{description:<|"|>{{- tool_data[\'function\'][\'description\'] -}}<|"|>\n    {%- set params = tool_data[\'function\'][\'parameters\'] -%}\n    {%- if params -%}\n        ,parameters:{\n        {%- if params[\'properties\'] -%}\n            properties:{ {{- format_parameters(params[\'properties\'], params[\'required\']) -}} },\n        {%- endif -%}\n        {%- if params[\'required\'] -%}\n            required:[\n            {%- for item in params[\'required\'] -%}\n                <|"|>{{- item -}}<|"|>\n                {{- \',\' if not loop.last -}}\n            {%- endfor -%}\n            ],\n        {%- endif -%}\n        {%- if params[\'type\'] -%}\n            type:<|"|>{{- params[\'type\'] | upper -}}<|"|>}\n        {%- endif -%}\n    {%- endif -%}\n    {%- if \'response\' in tool_data[\'function\'] -%}\n        {%- set response_declaration = tool_data[\'function\'][\'response\'] -%}\n        ,response:{\n        {%- if response_declaration[\'description\'] -%}\n            description:<|"|>{{- response_declaration[\'description\'] -}}<|"|>,\n        {%- endif -%}\n        {%- if response_declaration[\'type\'] | upper == \'OBJECT\' -%}\n            type:<|"|>{{- response_declaration[\'type\'] | upper -}}<|"|>}\n        {%- endif -%}\n    {%- endif -%}\n    }\n{%- endmacro -%}\n{%- macro format_argument(argument, escape_keys=True) -%}\n    {%- if argument is string -%}\n        {{- \'<|"|>\' + argument + \'<|"|>\' -}}\n    {%- elif argument is boolean -%}\n        {{- \'true\' if argument else \'false\' -}}\n    {%- elif argument is mapping -%}\n        {{- \'{\' -}}\n        {%- set ns = namespace(found_first=false) -%}\n        {%- for key, value in argument | dictsort -%}\n            {%- if ns.found_first %},{% endif -%}\n            {%- set ns.found_first = true -%}\n            {%- if escape_keys -%}\n                {{- \'<|"|>\' + key + \'<|"|>\' -}}\n            {%- else -%}\n                {{- key -}}\n            {%- endif -%}\n            :{{- format_argument(value, escape_keys=escape_keys) -}}\n        {%- endfor -%}\n        {{- \'}\' -}}\n    {%- elif argument is sequence -%}\n        {{- \'[\' -}}\n        {%- for item in argument -%}\n            {{- format_argument(item, escape_keys=escape_keys) -}}\n            {%- if not loop.last %},{% endif -%}\n        {%- endfor -%}\n        {{- \']\' -}}\n    {%- else -%}\n        {{- argument -}}\n    {%- endif -%}\n{%- endmacro -%}\n{%- macro strip_thinking(text) -%}\n    {%- set ns = namespace(result=\'\') -%}\n    {%- for part in text.split(\'<channel|>\') -%}\n        {%- if \'<|channel>\' in part -%}\n            {%- set ns.result = ns.result + part.split(\'<|channel>\')[0] -%}\n        {%- else -%}\n            {%- set ns.result = ns.result + part -%}\n        {%- endif -%}\n    {%- endfor -%}\n    {{- ns.result | trim -}}\n{%- endmacro -%}\n\n{%- set ns = namespace(prev_message_type=None) -%}\n{%- set loop_messages = messages -%}\n{{ bos_token }}\n{#- Handle System/Tool Definitions Block -#}\n{%- if (enable_thinking is defined and enable_thinking) or tools or messages[0][\'role\'] in [\'system\', \'developer\'] -%}\n    {{- \'<|turn>system\\n\' -}}\n\n    {#- Inject Thinking token at the very top of the FIRST system turn -#}\n    {%- if enable_thinking is defined and enable_thinking -%}\n        {{- \'<|think|>\' -}}\n        {%- set ns.prev_message_type = \'think\' -%}\n    {%- endif -%}\n\n    {%- if messages[0][\'role\'] in [\'system\', \'developer\'] -%}\n        {{- messages[0][\'content\'] | trim -}}\n        {%- set loop_messages = messages[1:] -%}\n    {%- endif -%}\n\n    {%- if tools -%}\n        {%- for tool in tools %}\n            {{- \'<|tool>\' -}}\n            {{- format_function_declaration(tool) | trim -}}\n            {{- \'<tool|>\' -}}\n        {%- endfor %}\n        {%- set ns.prev_message_type = \'tool\' -%}\n    {%- endif -%}\n\n    {{- \'<turn|>\\n\' -}}\n{%- endif %}\n\n{#- Loop through messages -#}\n{%- for message in loop_messages -%}\n    {%- set ns.prev_message_type = None -%}\n    {%- set role = \'model\' if message[\'role\'] == \'assistant\' else message[\'role\'] -%}\n        {{- \'<|turn>\' + role + \'\\n\' }}\n\n            {%- if message[\'tool_calls\'] -%}\n                {%- for tool_call in message[\'tool_calls\'] -%}\n                    {%- set function = tool_call[\'function\'] -%}\n                    {{- \'<|tool_call>call:\' + function[\'name\'] + \'{\' -}}\n                    {%- if function[\'arguments\'] is mapping -%}\n                        {%- set ns_args = namespace(found_first=false) -%}\n                        {%- for key, value in function[\'arguments\'] | dictsort -%}\n                            {%- if ns_args.found_first %},{% endif -%}\n                            {%- set ns_args.found_first = true -%}\n                            {{- key -}}:{{- format_argument(value, escape_keys=False) -}}\n                        {%- endfor -%}\n                    {%- elif function[\'arguments\'] is string -%}\n                        {{- function[\'arguments\'] -}}\n                    {%- endif -%}\n                    {{- \'}<tool_call|>\' -}}\n                {%- endfor -%}\n                {%- set ns.prev_message_type = \'tool_call\' -%}\n            {%- endif -%}\n\n            {%- if message[\'tool_responses\'] -%}\n                {#- Tool Response handling -#}\n                {%- for tool_response in message[\'tool_responses\'] -%}\n                    {{- \'<|tool_response>\' -}}\n                    {%- if tool_response[\'response\'] is mapping -%}\n                        {{- \'response:\' + tool_response[\'name\'] | default(\'unknown\') + \'{\' -}}\n                        {%- for key, value in tool_response[\'response\'] | dictsort -%}\n                            {{- key -}}:{{- format_argument(value, escape_keys=False) -}}\n                            {%- if not loop.last %},{% endif -%}\n                        {%- endfor -%}\n                        {{- \'}\' -}}\n                    {%- else -%}\n                        {{- \'response:\' + tool_response[\'name\'] | default(\'unknown\') + \'{value:\' + format_argument(tool_response[\'response\'], escape_keys=False) + \'}\' -}}\n                    {%- endif -%}\n                    {{- \'<tool_response|>\' -}}\n                {%- endfor -%}\n                {%- set ns.prev_message_type = \'tool_response\' -%}\n            {%- endif -%}\n\n            {%- if message[\'content\'] is string -%}\n                {%- if role == \'model\' -%}\n                    {{- strip_thinking(message[\'content\']) -}}\n                {%- else -%}\n                    {{- message[\'content\'] | trim -}}\n                {%- endif -%}\n            {%- elif message[\'content\'] is sequence -%}\n                {%- for item in message[\'content\'] -%}\n                    {%- if item[\'type\'] == \'text\' -%}\n                        {%- if role == \'model\' -%}\n                            {{- strip_thinking(item[\'text\']) -}}\n                        {%- else -%}\n                            {{- item[\'text\'] | trim -}}\n                        {%- endif -%}\n                    {%- elif item[\'type\'] == \'image\' -%}\n                        {{- \'\\n\\n<|image|>\\n\\n\' -}}\n                        {%- set ns.prev_message_type = \'image\' -%}\n                    {%- elif item[\'type\'] == \'audio\' -%}\n                        {{- \'<|audio|>\' -}}\n                        {%- set ns.prev_message_type = \'audio\' -%}\n                    {%- elif item[\'type\'] == \'video\' -%}\n                        {{- \'\\n\\n<|video|>\\n\\n\' -}}\n                        {%- set ns.prev_message_type = \'video\' -%}\n                    {%- endif -%}\n                {%- endfor -%}\n            {%- endif -%}\n\n        {%- if not (message[\'tool_responses\'] and not message[\'content\']) -%}\n            {{- \'<turn|>\\n\' -}}\n        {%- endif -%}\n{%- endfor -%}\n\n{%- if add_generation_prompt -%}\n    {%- if ns.prev_message_type != \'tool_response\' -%}\n        {{- \'<|turn>model\\n\' -}}\n    {%- endif -%}\n    {%- if not enable_thinking | default(false) -%}\n        {{- \'<|channel>thought\\n<channel|>\' -}}\n    {%- endif -%}\n{%- endif -%}\n', 'gemma4.attention.shared_kv_layers': '0', 'gemma4.final_logit_softcapping': '30.000000', 'gemma4.attention.key_length_swa': '256', 'gemma4.context_length': '262144', 'general.file_type': '15', 'general.finetune': 'it', 'gemma4.embedding_length': '2816', 'gemma4.embedding_length_per_layer_input': '0', 'gemma4.expert_count': '128', 'tokenizer.ggml.add_space_prefix': 'false', 'general.architecture': 'gemma4', 'tokenizer.ggml.padding_token_id': '0', 'general.sampling.top_k': '64', 'gemma4.block_count': '30', 'gemma4.rope.freq_base': '1000000.000000', 'gemma4.expert_used_count': '8', 'gemma4.feed_forward_length': '2112', 'tokenizer.ggml.bos_token_id': '2', 'gemma4.attention.value_length_swa': '256', 'general.type': 'model', 'tokenizer.ggml.unknown_token_id': '3', 'general.sampling.top_p': '0.950000', 'gemma4.attention.value_length': '512'}
 Available chat formats from metadata: chat_template.default
-INFO:     Started server process [48924]
+INFO:     Started server process [76244]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:11435 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49951 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49954 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49954 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49954 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49954 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49954 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49955 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49956 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49957 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49957 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49957 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49957 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49957 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49958 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49958 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49959 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49959 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49959 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49959 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49959 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49960 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49961 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49961 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49961 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49961 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49961 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49962 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49962 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49963 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59956 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59964 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59964 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59964 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59964 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59964 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59965 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59966 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59967 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59967 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59967 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59967 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59967 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59968 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59968 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59969 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59969 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59969 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59969 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59969 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59970 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59971 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59971 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59971 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59971 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59971 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59972 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59972 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59974 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32_4', name = 'kernel_unary_f32_f32_4_op=10_cnt=0'
-ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=10_cnt=0            0x11fd0ce40 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=10_cnt=0            0x131b17900 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rms_norm_mul_f32_4', name = 'kernel_rms_norm_mul_f32_4'
-ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_mul_f32_4                     0x11fd0d7b0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_mul_f32_4                     0x131a1aab0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_q4_K_f32', name = 'kernel_mul_mm_q4_K_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q4_K_f32_bci=0_bco=1            0x11fd10010 | th_max =  896 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q4_K_f32_bci=0_bco=1            0x131b1ca20 | th_max =  896 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_q6_K_f32', name = 'kernel_mul_mm_q6_K_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q6_K_f32_bci=0_bco=1            0x11fd10710 | th_max =  896 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q6_K_f32_bci=0_bco=1            0x131b1db00 | th_max =  896 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rms_norm_f32_4', name = 'kernel_rms_norm_f32_4'
-ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_f32_4                         0x11fd10c70 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_f32_4                         0x131b1d5f0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rope_neox_f32', name = 'kernel_rope_neox_f32_imrope=0'
-ggml_metal_library_compile_pipeline: loaded kernel_rope_neox_f32_imrope=0                 0x11fd0f2b0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_rope_neox_f32_imrope=0                 0x131b1f950 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_set_rows_f16_i64', name = 'kernel_set_rows_f16_i64'
-ggml_metal_library_compile_pipeline: loaded kernel_set_rows_f16_i64                       0x105145b30 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_set_rows_f16_i64                       0x131b1ff90 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_f16_f32', name = 'kernel_mul_mm_f16_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_f16_f32_bci=0_bco=1             0x105147a50 | th_max =  896 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_f16_f32_bci=0_bco=1             0x131b21b50 | th_max =  896 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_soft_max_f32_4', name = 'kernel_soft_max_f32_4'
-ggml_metal_library_compile_pipeline: loaded kernel_soft_max_f32_4                         0x105146c90 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_soft_max_f32_4                         0x131b20df0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_cpy_f32_f32', name = 'kernel_cpy_f32_f32'
-ggml_metal_library_compile_pipeline: loaded kernel_cpy_f32_f32                            0x11dd82b50 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_cpy_f32_f32                            0x131b1e370 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_rms_norm_mul_add_f32_4', name = 'kernel_rms_norm_mul_add_f32_4'
-ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_mul_add_f32_4                 0x11fd12160 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_rms_norm_mul_add_f32_4                 0x131b228c0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=0_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=0_cb=0      0x11fd13df0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=0_cb=0      0x131b24cb0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_f32_f32', name = 'kernel_mul_mm_f32_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_f32_f32_bci=0_bco=1             0x11fd148f0 | th_max =  832 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_f32_f32_bci=0_bco=1             0x131b257d0 | th_max =  832 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_argsort_f32_i32_desc', name = 'kernel_argsort_f32_i32_desc'
-ggml_metal_library_compile_pipeline: loaded kernel_argsort_f32_i32_desc                   0x11fd13810 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_argsort_f32_i32_desc                   0x131b23e80 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_argsort_merge_f32_i32_desc', name = 'kernel_argsort_merge_f32_i32_desc'
-ggml_metal_library_compile_pipeline: loaded kernel_argsort_merge_f32_i32_desc             0x11fd12a50 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_argsort_merge_f32_i32_desc             0x131b265c0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_get_rows_f32', name = 'kernel_get_rows_f32'
-ggml_metal_library_compile_pipeline: loaded kernel_get_rows_f32                           0x11fd16390 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_get_rows_f32                           0x131b24530 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_id_q4_K_f32', name = 'kernel_mul_mv_id_q4_K_f32_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q4_K_f32_nsg=2               0x11fd169e0 | th_max =  768 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q4_K_f32_nsg=2               0x131b27900 | th_max =  768 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_geglu_f32', name = 'kernel_geglu_f32'
-ggml_metal_library_compile_pipeline: loaded kernel_geglu_f32                              0x11fd15da0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_geglu_f32                              0x131b28550 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_sum_rows_f32_f32_4', name = 'kernel_sum_rows_f32_f32_4_op=10'
-ggml_metal_library_compile_pipeline: loaded kernel_sum_rows_f32_f32_4_op=10               0x11fd17f90 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_sum_rows_f32_f32_4_op=10               0x131b28e70 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32', name = 'kernel_unary_f32_f32_op=12_cnt=1'
-ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_op=12_cnt=1              0x11fd198f0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_op=12_cnt=1              0x131b2a7f0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_id_q8_0_f32', name = 'kernel_mul_mv_id_q8_0_f32_nsg=4'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q8_0_f32_nsg=4               0x11fd19eb0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q8_0_f32_nsg=4               0x131b2adc0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32', name = 'kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=0_cb=1'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=0_cb=1      0x105148380 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=0_cb=1      0x131b2be60 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_repeat_f32', name = 'kernel_repeat_f32'
-ggml_metal_library_compile_pipeline: loaded kernel_repeat_f32                             0x105148610 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_repeat_f32                             0x131b27c00 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_q8_0_f32', name = 'kernel_mul_mm_q8_0_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q8_0_f32_bci=0_bco=1            0x105149870 | th_max =  896 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q8_0_f32_bci=0_bco=1            0x131b2cc40 | th_max =  896 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32', name = 'kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=0_cb=1'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=0_cb=1      0x105148c70 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=0_cb=1      0x131b29290 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=0_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=0_cb=0      0x10514a6c0 | th_max =  896 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=0_cb=0      0x131b2e480 | th_max =  896 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=0_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=0_cb=0      0x10514b2f0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=0_cb=0      0x131b2efc0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_id_q5_0_f32', name = 'kernel_mul_mv_id_q5_0_f32_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q5_0_f32_nsg=2               0x10514fd50 | th_max =  576 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_id_q5_0_f32_nsg=2               0x131b32e40 | th_max =  576 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mm_q5_0_f32', name = 'kernel_mul_mm_q5_0_f32_bci=0_bco=1'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q5_0_f32_bci=0_bco=1            0x11fc06b30 | th_max =  832 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mm_q5_0_f32_bci=0_bco=1            0x131b349f0 | th_max =  832 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_pad_f32', name = 'kernel_pad_f32'
-ggml_metal_library_compile_pipeline: loaded kernel_pad_f32                                0x11fc07bc0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_pad_f32                                0x131b35bb0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32_4', name = 'kernel_unary_f32_f32_4_op=100_cnt=0'
-ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=100_cnt=0           0x11fc1b610 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=100_cnt=0           0x131b483c0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_unary_f32_f32_4', name = 'kernel_unary_f32_f32_4_op=10_cnt=1'
-ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=10_cnt=1            0x10514f3c0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_unary_f32_f32_4_op=10_cnt=1            0x131927cc0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q4_K_f32', name = 'kernel_mul_mv_q4_K_f32_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q4_K_f32_nsg=2                  0x105150700 | th_max =  768 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q4_K_f32_nsg=2                  0x13193f7c0 | th_max =  768 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q6_K_f32', name = 'kernel_mul_mv_q6_K_f32_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q6_K_f32_nsg=2                  0x105140660 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q6_K_f32_nsg=2                  0x13193fbf0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f16_f32_4', name = 'kernel_mul_mv_f16_f32_4_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=2                 0x105151800 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=2                 0x131a1b3b0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=1_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=1_cb=0      0x11dd91180 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=2_nf=1_rb=1_cb=0      0x131940280 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f32_f32_4', name = 'kernel_mul_mv_f32_f32_4_nsg=4'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f32_f32_4_nsg=4                 0x11dd90cc0 | th_max =  768 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f32_f32_4_nsg=4                 0x1319407c0 | th_max =  768 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32', name = 'kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=1_cb=1'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=1_cb=1      0x11dd92940 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=3_nf=1_rb=1_cb=1      0x131941f00 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q8_0_f32', name = 'kernel_mul_mv_q8_0_f32_nsg=4'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q8_0_f32_nsg=4                  0x11dd932e0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q8_0_f32_nsg=4                  0x1319428e0 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=1_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=1_cb=0      0x11dd93c30 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=7_rb=1_cb=0      0x131943230 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32_4', name = 'kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=1_cb=0'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=1_cb=0      0x11dd944a0 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_4_op=0_nf=1_rb=1_cb=0      0x131943a80 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_bin_fuse_f32_f32_f32', name = 'kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=1_cb=1'
-ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=1_cb=1      0x11dd94d90 | th_max = 1024 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_bin_fuse_f32_f32_f32_op=2_nf=1_rb=1_cb=1      0x131944370 | th_max = 1024 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_q5_0_f32', name = 'kernel_mul_mv_q5_0_f32_nsg=2'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q5_0_f32_nsg=2                  0x105152340 | th_max =  640 | th_width =   32
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_q5_0_f32_nsg=2                  0x131a1c230 | th_max =  640 | th_width =   32
 ggml_metal_library_compile_pipeline: compiling pipeline: base = 'kernel_mul_mv_f16_f32_4', name = 'kernel_mul_mv_f16_f32_4_nsg=4'
-ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=4                 0x10514d010 | th_max = 1024 | th_width =   32
-llama_perf_context_print:        load time =       0.61 ms
-llama_perf_context_print: prompt eval time =       0.05 ms /    31 tokens (    0.00 ms per token, 620000.00 tokens per second)
-llama_perf_context_print:        eval time =     503.27 ms /    34 runs   (   14.80 ms per token,    67.56 tokens per second)
-llama_perf_context_print:       total time =     756.56 ms /    65 tokens
-llama_perf_context_print:    graphs reused =         33
-INFO:     127.0.0.1:49978 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49978 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49978 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49978 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49978 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49979 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49980 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49981 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49981 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49981 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49981 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49981 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49982 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49982 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49983 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49983 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49983 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49983 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49983 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49984 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49985 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49985 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49985 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49985 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49985 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49986 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49986 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49987 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+ggml_metal_library_compile_pipeline: loaded kernel_mul_mv_f16_f32_4_nsg=4                 0x131a1ceb0 | th_max = 1024 | th_width =   32
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
+graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
+process_ubatch: failed to compute graph, compute status: -1
+decode: removing memory module entries for seq_id = 0, pos = [53, +inf)
+llama_decode: failed to decode, ret = -3
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 26, in collapse_excgroups
+  |     yield
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 479, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
+    |     await self.app(scope, receive, send_wrapper)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
+    |     await route.handle(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
+    |     await response(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
+    |     with collapse_excgroups():
+    |   File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
+    |     async for chunk in iterate_in_threadpool(iterator):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
+    |     yield await anyio.to_thread.run_sync(_next, as_iterator)
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
+    |     return await get_async_backend().run_sync_in_worker_thread(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
+    |     return await future
+    |            ^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
+    |     result = context.run(func, *args)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
+    |     return next(iterator)
+    |            ^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
+    |     for i, chunk in enumerate(chunks):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
+    |     for token in self.generate(
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
+    |     self.eval(tokens)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
+    |     self._ctx.decode(self._batch)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
+    |     raise RuntimeError(f"llama_decode returned {return_code}")
+    | RuntimeError: llama_decode returned -3
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
+    await self.app(scope, receive, send_wrapper)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
+    await response(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
+    with collapse_excgroups():
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
+    async for chunk in iterate_in_threadpool(iterator):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
+    yield await anyio.to_thread.run_sync(_next, as_iterator)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
+    return next(iterator)
+           ^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
+    for i, chunk in enumerate(chunks):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
+    for token in self.generate(
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
+    self.eval(tokens)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
+    self._ctx.decode(self._batch)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
+    raise RuntimeError(f"llama_decode returned {return_code}")
+RuntimeError: llama_decode returned -3
+INFO:     127.0.0.1:59980 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59980 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59980 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59980 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59980 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59981 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59982 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59983 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59983 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59983 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59983 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59983 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59984 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59984 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59985 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59985 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59985 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59985 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59985 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59986 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59987 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59987 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59987 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59987 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59987 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59988 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59988 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59989 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 29 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
 process_ubatch: failed to compute graph, compute status: -1
-decode: removing memory module entries for seq_id = 0, pos = [39, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
 llama_decode: failed to decode, ret = -3
 ERROR:    Exception in ASGI application
   + Exception Group Traceback (most recent call last):
@@ -1391,32 +1575,32 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:49990 - "POST /v1/chat/completions HTTP/1.1" 200 OK
-Llama.generate: 38 prefix-match hit, remaining 1 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+INFO:     127.0.0.1:59990 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+Llama.generate: 10 prefix-match hit, remaining 29 prompt tokens to eval
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
 process_ubatch: failed to compute graph, compute status: -1
-decode: removing memory module entries for seq_id = 0, pos = [38, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
 llama_decode: failed to decode, ret = -3
 ERROR:    Exception in ASGI application
   + Exception Group Traceback (most recent call last):
@@ -1582,32 +1766,32 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:49991 - "POST /v1/chat/completions HTTP/1.1" 200 OK
-Llama.generate: 38 prefix-match hit, remaining 1 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+INFO:     127.0.0.1:59991 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+Llama.generate: 10 prefix-match hit, remaining 29 prompt tokens to eval
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
 process_ubatch: failed to compute graph, compute status: -1
-decode: removing memory module entries for seq_id = 0, pos = [38, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
 llama_decode: failed to decode, ret = -3
 ERROR:    Exception in ASGI application
   + Exception Group Traceback (most recent call last):
@@ -1773,32 +1957,32 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:49992 - "POST /v1/chat/completions HTTP/1.1" 200 OK
-Llama.generate: 38 prefix-match hit, remaining 1 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+INFO:     127.0.0.1:59992 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+Llama.generate: 10 prefix-match hit, remaining 29 prompt tokens to eval
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
 process_ubatch: failed to compute graph, compute status: -1
-decode: removing memory module entries for seq_id = 0, pos = [38, +inf)
+decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
 llama_decode: failed to decode, ret = -3
 ERROR:    Exception in ASGI application
   + Exception Group Traceback (most recent call last):
@@ -1964,54 +2148,54 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:49994 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49994 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49994 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49994 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49994 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49995 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49996 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49997 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49997 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49997 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49997 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49997 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49998 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49998 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49999 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49999 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49999 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49999 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49999 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50000 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50001 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50001 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50001 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50001 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50001 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50002 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50002 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50003 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59994 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59994 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59994 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59994 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59994 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59995 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59996 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59997 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59997 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59997 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59997 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59997 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59998 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59998 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59999 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59999 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59999 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59999 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59999 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60000 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60001 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60001 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60001 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60001 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60001 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60002 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60002 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60003 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 26 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -2182,27 +2366,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50004 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60004 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 26 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -2373,27 +2557,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50005 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60005 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 26 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -2564,27 +2748,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50006 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60006 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 26 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -2755,54 +2939,54 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50008 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50008 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50008 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50008 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50008 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50009 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50010 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50011 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50011 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50011 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50011 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50011 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50012 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50012 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50013 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50013 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50013 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50013 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50013 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50014 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50015 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50015 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50015 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50015 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50015 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50016 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50016 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50017 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60008 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60008 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60008 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60008 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60008 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60009 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60010 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60011 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60011 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60011 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60011 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60011 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60012 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60012 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60013 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60013 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60013 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60013 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60013 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60014 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60015 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60015 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60015 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60015 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60015 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60016 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60016 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60017 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 27 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -2973,27 +3157,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50018 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60018 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 27 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -3164,27 +3348,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50019 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60019 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 27 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -3355,245 +3539,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50020 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60020 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 27 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
-graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
-process_ubatch: failed to compute graph, compute status: -1
-decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
-llama_decode: failed to decode, ret = -3
-ERROR:    Exception in ASGI application
-  + Exception Group Traceback (most recent call last):
-  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 26, in collapse_excgroups
-  |     yield
-  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 479, in __call__
-  |     async with anyio.create_task_group() as task_group:
-  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 799, in __aexit__
-  |     raise BaseExceptionGroup(
-  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
-  +-+---------------- 1 ----------------
-    | Traceback (most recent call last):
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
-    |     result = await app(  # type: ignore[func-returns-value]
-    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
-    |     return await self.app(scope, receive, send)
-    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
-    |     await super().__call__(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
-    |     await self.middleware_stack(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
-    |     raise exc
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
-    |     await self.app(scope, receive, _send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
-    |     await self.app(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
-    |     await self.app(scope, receive, send_wrapper)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
-    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    |     raise exc
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    |     await app(scope, receive, sender)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
-    |     await self.app(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
-    |     await self.middleware_stack(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
-    |     await route.handle(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
-    |     await self.app(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
-    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    |     raise exc
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    |     await app(scope, receive, sender)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
-    |     await response(scope, receive, send)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
-    |     with collapse_excgroups():
-    |   File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
-    |     self.gen.throw(typ, value, traceback)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
-    |     raise exc
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
-    |     async for chunk in iterate_in_threadpool(iterator):
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
-    |     yield await anyio.to_thread.run_sync(_next, as_iterator)
-    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
-    |     return await get_async_backend().run_sync_in_worker_thread(
-    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
-    |     return await future
-    |            ^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
-    |     result = context.run(func, *args)
-    |              ^^^^^^^^^^^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
-    |     return next(iterator)
-    |            ^^^^^^^^^^^^^^
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
-    |     for i, chunk in enumerate(chunks):
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
-    |     for token in self.generate(
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
-    |     self.eval(tokens)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
-    |     self._ctx.decode(self._batch)
-    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
-    |     raise RuntimeError(f"llama_decode returned {return_code}")
-    | RuntimeError: llama_decode returned -3
-    +------------------------------------
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
-    result = await app(  # type: ignore[func-returns-value]
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
-    return await self.app(scope, receive, send)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
-    await super().__call__(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
-    raise exc
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
-    await self.app(scope, receive, _send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
-    await self.app(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
-    await self.app(scope, receive, send_wrapper)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
-    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
-    await self.app(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
-    await self.middleware_stack(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
-    await route.handle(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
-    await self.app(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
-    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
-    raise exc
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
-    await app(scope, receive, sender)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
-    await response(scope, receive, send)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
-    with collapse_excgroups():
-  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
-    self.gen.throw(typ, value, traceback)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
-    raise exc
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
-    async for chunk in iterate_in_threadpool(iterator):
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
-    yield await anyio.to_thread.run_sync(_next, as_iterator)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
-    return await get_async_backend().run_sync_in_worker_thread(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
-    return await future
-           ^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
-    result = context.run(func, *args)
-             ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
-    return next(iterator)
-           ^^^^^^^^^^^^^^
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
-    for i, chunk in enumerate(chunks):
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
-    for token in self.generate(
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
-    self.eval(tokens)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
-    self._ctx.decode(self._batch)
-  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
-    raise RuntimeError(f"llama_decode returned {return_code}")
-RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50023 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50023 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50023 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50023 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50023 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50024 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50025 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50026 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50026 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50026 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50026 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50026 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50027 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50027 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50028 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50028 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50028 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50028 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50028 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50029 - "POST /api/show HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50030 - "GET /api/v1/models HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50030 - "GET /api/tags HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50030 - "GET /v1/props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50030 - "GET /props HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50030 - "GET /version HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50031 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50031 - "GET /v1/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50032 - "POST /v1/chat/completions HTTP/1.1" 200 OK
-Llama.generate: 10 prefix-match hit, remaining 23 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
-error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -3764,27 +3730,54 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50033 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60022 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60022 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60022 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60022 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60022 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60023 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60024 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60025 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60025 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60025 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60025 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60025 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60026 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60026 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60027 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60027 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60027 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60027 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60027 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60028 - "POST /api/show HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60029 - "GET /api/v1/models HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60029 - "GET /api/tags HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60029 - "GET /v1/props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60029 - "GET /props HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60029 - "GET /version HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60030 - "GET /v1/models/gemma-4-26b-a4b HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60030 - "GET /v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60031 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 23 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -3955,27 +3948,27 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50034 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60032 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 23 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -4146,27 +4139,218 @@ Traceback (most recent call last):
   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
     raise RuntimeError(f"llama_decode returned {return_code}")
 RuntimeError: llama_decode returned -3
-INFO:     127.0.0.1:50035 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60033 - "POST /v1/chat/completions HTTP/1.1" 200 OK
 Llama.generate: 10 prefix-match hit, remaining 23 prompt tokens to eval
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
-ggml_metal_synchronize: error: command buffer 1 failed with status 5
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
+graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
+process_ubatch: failed to compute graph, compute status: -1
+decode: removing memory module entries for seq_id = 0, pos = [10, +inf)
+llama_decode: failed to decode, ret = -3
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 26, in collapse_excgroups
+  |     yield
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 479, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
+    |     await self.app(scope, receive, send_wrapper)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
+    |     await route.handle(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+    |     await self.app(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
+    |     await response(scope, receive, send)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
+    |     with collapse_excgroups():
+    |   File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    |     raise exc
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
+    |     async for chunk in iterate_in_threadpool(iterator):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
+    |     yield await anyio.to_thread.run_sync(_next, as_iterator)
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
+    |     return await get_async_backend().run_sync_in_worker_thread(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
+    |     return await future
+    |            ^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
+    |     result = context.run(func, *args)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
+    |     return next(iterator)
+    |            ^^^^^^^^^^^^^^
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
+    |     for i, chunk in enumerate(chunks):
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
+    |     for token in self.generate(
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
+    |     self.eval(tokens)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
+    |     self._ctx.decode(self._batch)
+    |   File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
+    |     raise RuntimeError(f"llama_decode returned {return_code}")
+    | RuntimeError: llama_decode returned -3
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 56, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette_context/middleware/raw_middleware.py", line 92, in __call__
+    await self.app(scope, receive, send_wrapper)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 121, in app
+    await response(scope, receive, send)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/sse.py", line 478, in __call__
+    with collapse_excgroups():
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    raise exc
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/server/app.py", line 208, in get_event_publisher
+    async for chunk in iterate_in_threadpool(iterator):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 55, in iterate_in_threadpool
+    yield await anyio.to_thread.run_sync(_next, as_iterator)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 2518, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 1002, in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/starlette/concurrency.py", line 44, in _next
+    return next(iterator)
+           ^^^^^^^^^^^^^^
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama_chat_format.py", line 328, in _convert_text_completion_chunks_to_chat
+    for i, chunk in enumerate(chunks):
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 1349, in _create_completion
+    for token in self.generate(
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 933, in generate
+    self.eval(tokens)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/llama.py", line 661, in eval
+    self._ctx.decode(self._batch)
+  File "/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/.venv/lib/python3.11/site-packages/llama_cpp/_internals.py", line 330, in decode
+    raise RuntimeError(f"llama_decode returned {return_code}")
+RuntimeError: llama_decode returned -3
+INFO:     127.0.0.1:60034 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+Llama.generate: 10 prefix-match hit, remaining 23 prompt tokens to eval
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
+error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+ggml_metal_synchronize: error: command buffer 0 failed with status 5
 error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
 ggml_metal_graph_compute: backend is in error state from a previous command buffer failure - recreate the backend to recover
 graph_compute: ggml_backend_sched_graph_compute_async failed with error -1
@@ -4340,4 +4524,4 @@ RuntimeError: llama_decode returned -3
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [48924]
+INFO:     Finished server process [76244]

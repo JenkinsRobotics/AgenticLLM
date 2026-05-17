@@ -52,12 +52,16 @@ class CronRunner(threading.Thread):
 
     def run(self) -> None:
         while not self._stop.is_set():
+            # Claim atomically — the file lock inside `claim_due_schedules`
+            # guarantees a second runner on the same host won't double-fire
+            # this tick's due schedules. The mark-ran row was written under
+            # the same lock, so we can fire outside the lock safely.
             try:
-                due = mm.due_schedules(now=datetime.now(timezone.utc))
+                claimed = mm.claim_due_schedules(now=datetime.now(timezone.utc))
             except Exception as exc:
-                print(f"[cron-runner] list error: {exc}", flush=True)
-                due = []
-            for sched in due:
+                print(f"[cron-runner] claim error: {exc}", flush=True)
+                claimed = []
+            for sched in claimed:
                 if self._stop.is_set():
                     break
                 name = sched.get("name") or "?"
@@ -73,9 +77,5 @@ class CronRunner(threading.Thread):
                         self._callback(prompt)
                 except Exception as exc:
                     print(f"[cron-runner] {name!r} callback failed: {exc}", flush=True)
-                try:
-                    mm.mark_schedule_ran(name)
-                except Exception as exc:
-                    print(f"[cron-runner] mark_ran({name!r}) failed: {exc}", flush=True)
             # Wait for the next tick, but wake immediately on shutdown.
             self._stop.wait(self._poll_s)

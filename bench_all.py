@@ -99,6 +99,12 @@ def run_inprocess(name: str, prompts: list[str]) -> list[dict[str, Any]]:
 
     main_mod.init_extensions(_Args(), client)
     tools_mod.ensure_workspace()
+    # Prewarm so the first prompt isn't penalized by cold KV cache. Only
+    # python_pydantic_ai exposes `prewarm`; the other two amortize the
+    # cost into their first real turn naturally.
+    prewarm_fn = getattr(main_mod, "prewarm", None)
+    if prewarm_fn is not None:
+        prewarm_fn(client)
 
     results: list[dict[str, Any]] = []
     try:

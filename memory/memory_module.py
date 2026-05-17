@@ -232,9 +232,13 @@ def _ensure_semantic_model() -> Any:
     from sentence_transformers import SentenceTransformer
 
     import time as _t
+
+    # Pin to CPU. The all-MiniLM model is tiny and CPU-fast (a few ms per
+    # query); putting it on Apple Metal collides with llama-cpp's Metal
+    # context and corrupts subsequent LLM decodes. CPU avoids the fight.
     started = _t.perf_counter()
-    model = SentenceTransformer(EMBED_MODEL_ID)
-    print(f"[semantic-memory] {EMBED_MODEL_ID} loaded in {_t.perf_counter() - started:.1f}s", flush=True)
+    model = SentenceTransformer(EMBED_MODEL_ID, device="cpu")
+    print(f"[semantic-memory] {EMBED_MODEL_ID} loaded on CPU in {_t.perf_counter() - started:.1f}s", flush=True)
     _semantic_state["model"] = model
     _semantic_state["model_id"] = EMBED_MODEL_ID
     return model
@@ -460,7 +464,12 @@ def cancel_schedule(name: str) -> bool:
 
 
 def due_schedules(now: Any = None) -> list[dict[str, Any]]:
-    """Return live schedules whose `next_run_at` has passed."""
+    """Return live schedules whose `next_run_at` has passed.
+
+    Read-only; safe to call from any context. The CronRunner uses
+    `claim_due_schedules` instead so two runners can coexist without
+    double-firing the same schedule.
+    """
     from datetime import datetime, timezone
 
     now = now or datetime.now(timezone.utc)
@@ -472,6 +481,55 @@ def due_schedules(now: Any = None) -> list[dict[str, Any]]:
         row for row in _live_schedules(_read_schedules_raw()).values()
         if (row.get("next_run_at") or "") <= cutoff
     ]
+
+
+def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
+    """Find every due schedule and atomically mark it as fired.
+
+    Under the file lock we read the current live state, identify due rows,
+    write the next-run-at update for each one (which makes it not-due for
+    the next reader), then release the lock. Returned rows are the
+    *original* row the caller should fire. Two CronRunners calling this
+    concurrently will not both claim the same fire window — the second
+    one sees the first one's update and finds zero due schedules.
+
+    If the caller crashes after claim but before firing, that fire is
+    silently lost. Acceptable for cron (better to miss a tick than
+    double-send a "hey, check the weather" Discord message).
+    """
+    from datetime import datetime, timezone
+
+    from croniter import croniter
+
+    now = now or datetime.now(timezone.utc)
+    cutoff = now.isoformat(timespec="seconds") if hasattr(now, "isoformat") else str(now)
+
+    with _schedules_file_lock():
+        live = _live_schedules(_read_schedules_raw())
+        claimed: list[dict[str, Any]] = []
+        if not live:
+            return []
+        with SCHEDULES_PATH.open("a", encoding="utf-8") as fh:
+            for name, sched in live.items():
+                if (sched.get("next_run_at") or "") > cutoff:
+                    continue
+                claimed.append(dict(sched))
+                # Update row makes this schedule not-due until the next cron tick.
+                try:
+                    nxt = croniter(sched["cron"], now).get_next(datetime)
+                except Exception:
+                    continue
+                update = {
+                    "name": name,
+                    "cron": sched["cron"],
+                    "prompt": sched["prompt"],
+                    "created_at": sched["created_at"],
+                    "next_run_at": nxt.isoformat(timespec="seconds"),
+                    "last_run_at": now.isoformat(timespec="seconds"),
+                    "cancelled": False,
+                }
+                fh.write(json.dumps(update, ensure_ascii=True) + "\n")
+        return claimed
 
 
 def mark_schedule_ran(name: str) -> None:

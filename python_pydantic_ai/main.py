@@ -73,6 +73,16 @@ SKIP_FINAL_TOOLS = frozenset({
     # ask_user IS the final turn — the question is the answer, the next
     # phrase from the user is the next turn's input.
     "ask_user",
+    # Scheduling tools have natural one-line confirmations — no need for
+    # a final LLM rewrite. Faster and avoids the post-long-output
+    # "agent responds with empty text" edge case the validation found.
+    "schedule_prompt",
+    "cancel_schedule",
+    # delegate's `answer` field IS the user-facing response from the subagent.
+    "delegate",
+    # send_message returns a tight {sent: bool, ...} that has a natural
+    # one-line confirmation; no LLM summarization needed.
+    "send_message",
 })
 
 
@@ -137,6 +147,24 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if result.get("asked") is True:
             return str(result.get("question") or "")
         return "(no question to ask)"
+    if name == "schedule_prompt":
+        if result.get("scheduled"):
+            sname = result.get("name", "?")
+            nxt = result.get("next_run_at", "?")
+            return f"Scheduled {sname!r} — next run at {nxt}."
+        return f"Couldn't schedule: {result.get('error', 'unknown')}"
+    if name == "cancel_schedule":
+        if result.get("cancelled"):
+            return f"Cancelled schedule {result.get('name')!r}."
+        return f"No schedule named {result.get('name')!r} to cancel."
+    if name == "delegate":
+        if result.get("delegated"):
+            return str(result.get("answer") or "")
+        return f"Delegation failed: {result.get('error', 'unknown')}"
+    if name == "send_message":
+        if result.get("sent"):
+            return f"Sent."
+        return f"Couldn't send: {result.get('error', 'unknown')}"
     return str(result)
 
 
@@ -157,6 +185,13 @@ _pipeline: dict[str, Any] = {
     "with_memory": False,
     "with_mcp": False,
     "with_thinking": False,
+    # Client reference used by the `delegate` tool to recursively invoke
+    # the same agent. Set in init_extensions.
+    "client": None,
+    # Whether the KV cache has already been primed with system prompt +
+    # tool schema (set by `prewarm`). Once True, the first user-facing
+    # turn skips its cold-cache prefill penalty.
+    "prewarmed": False,
 }
 
 # Conversation history maintained across run_command calls (only populated
@@ -321,6 +356,39 @@ def build_agent(
     def system_status() -> dict:
         """Get current machine status (cpu, disk, load average)."""
         return tools.system_status()
+
+    @agent.tool_plain
+    def delegate(subtask: str) -> dict:
+        """Hand off a focused subtask to a fresh subagent.
+
+        Use this to split a complex request into independent pieces — e.g.
+        "search the web for X, then save the top result to a file" is one
+        delegate call for the web search and one for the save. The subagent
+        runs in its own context (no parent history) but shares memory and
+        the same toolset. Depth-limited to prevent runaway recursion.
+        """
+        client_ref = _pipeline.get("client")
+        if client_ref is None:
+            return {"delegated": False, "error": "no client wired — call init_extensions first"}
+        clean = (subtask or "").strip()
+        if not clean:
+            return {"delegated": False, "error": "empty subtask"}
+        return _delegate_internal(client_ref, clean)
+
+    @agent.tool_plain
+    def send_message(channel: str, recipient: str, text: str) -> dict:
+        """Send a proactive message to a user on a messaging channel.
+
+        Available `channel` values depend on which bridges are live in
+        this process — typically "discord", "telegram", "imessage".
+        `recipient` is the channel-specific ID (numeric Discord user ID,
+        Telegram chat ID, or iMessage phone/Apple-ID handle).
+
+        Use this together with `schedule_prompt` to send unattended
+        notifications: schedule a prompt that says "send the weather to
+        Discord user 12345" and the cron runner will fire it on time.
+        """
+        return tools.send_message(channel=channel, recipient=recipient, text=text)
 
     @agent.tool_plain
     def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict:
@@ -540,6 +608,13 @@ def _episodic_to_messages(turns: list[dict[str, str]]) -> list[Any]:
     return out
 
 
+# Maximum nesting depth for delegate() — guards against infinite recursion
+# if the subagent decides to delegate again. Configurable via env so a robot
+# can lower it for tighter resource bounds.
+_DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
+_delegate_depth = threading.local()
+
+
 async def _run_via_iter(
     agent: Agent,
     user_text: str,
@@ -618,6 +693,69 @@ async def _run_via_iter(
 # ============================================================================
 # run_command — main agent invocation, with latency split + history mgmt
 # ============================================================================
+def prewarm(client: Any) -> None:
+    """Prime the KV cache so the first user-facing turn isn't cold.
+
+    The first agent call against a freshly-loaded model pays a ~1 s
+    prefill cost to tokenize the system prompt + the 28-tool schema. By
+    running a single trivial turn at startup (output discarded), we shift
+    that cost from "what time is it" to the load phase — where the user
+    already accepts a wait. Idempotent.
+    """
+    if _pipeline.get("prewarmed"):
+        return
+    started = time.perf_counter()
+    try:
+        agent = _get_agent(client)
+        # A turn that's almost certain to produce a short free-text reply
+        # (no tool call), so we pay decode for ~1 prefill + a handful of
+        # tokens of generation. We don't keep history or log this turn.
+        agent.run_sync("Respond with just the word ready.")
+    except Exception as exc:
+        print(f"[python_pydantic_ai] prewarm skipped: {exc}", flush=True)
+        return
+    _pipeline["prewarmed"] = True
+    print(f"[python_pydantic_ai] agent prewarmed in {time.perf_counter() - started:.1f}s", flush=True)
+
+
+def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
+    """Run a subtask through the same agent with a depth guard.
+
+    No message_history is passed — the subagent gets a fresh context so it
+    can focus on the subtask without dragging in the parent's conversation.
+    Memory tools still hit the shared `memory/` store, so facts persist.
+    """
+    depth = getattr(_delegate_depth, "value", 0)
+    if depth >= _DELEGATE_MAX_DEPTH:
+        return {
+            "delegated": False,
+            "error": f"delegate recursion limit hit ({_DELEGATE_MAX_DEPTH}); "
+                     "the subagent tried to delegate again — refusing.",
+        }
+
+    _delegate_depth.value = depth + 1
+    started = time.perf_counter()
+    try:
+        agent = _get_agent(client)
+        iter_out = asyncio.run(_run_via_iter(agent, subtask, None))
+    finally:
+        _delegate_depth.value = depth
+
+    elapsed = time.perf_counter() - started
+    if iter_out["skipped"]:
+        text = iter_out["skipped_text"]
+    else:
+        result = iter_out.get("result")
+        text = (getattr(result, "output", None) if result else "") or ""
+    return {
+        "delegated": True,
+        "subtask": subtask,
+        "answer": text.strip(),
+        "depth": depth + 1,
+        "elapsed_s": round(elapsed, 3),
+    }
+
+
 def run_command(client: Any, user_text: str, default_mode: str) -> None:
     """Compatible with bench.py's expected (client, user_text, mode) signature.
 
@@ -1011,6 +1149,7 @@ def init_extensions(args, client) -> None:
     _pipeline["with_memory"] = with_memory
     _pipeline["with_mcp"] = with_mcp
     _pipeline["with_thinking"] = with_thinking
+    _pipeline["client"] = client
 
     # --- Memory: identity injection + episodic history ---------------------------
     if with_memory:

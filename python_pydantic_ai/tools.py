@@ -615,11 +615,14 @@ def _ensure_vision_model() -> tuple[Any, Any, str]:
 
     started = time.perf_counter()
     tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    device = "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
+    # Pin the VLM to CPU. Moondream is small (~1.9 B); a few seconds on
+    # CPU beats the Metal-context fight that corrupts llama-cpp's KV
+    # cache when both pytorch and llama.cpp claim Metal at the same time.
+    device = "cpu"
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         trust_remote_code=True,
-        torch_dtype=torch.float16 if device == "mps" else torch.float32,
+        torch_dtype=torch.float32,
     ).to(device).eval()
     print(f"[vision] {model_id} loaded on {device} in {time.perf_counter() - started:.1f}s", flush=True)
     _vision_state["model"] = model
@@ -748,6 +751,44 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
         "elapsed_s": round(elapsed, 3),
         "timed_out": timed_out,
     }
+
+
+def send_message(channel: str, recipient: str, text: str) -> dict[str, Any]:
+    """Send a proactive message to a user on a registered channel.
+
+    `channel` is one of the bridges started by `messaging.gateway`:
+    "discord", "telegram", "imessage".
+    `recipient` is the channel-specific ID:
+      - discord:  numeric user ID or channel ID (as a string)
+      - telegram: numeric chat ID (as a string)
+      - imessage: phone number ("+15551234567") or Apple ID email
+    `text` is the message body.
+
+    Use this for cron jobs ("every morning send weather to Discord") or
+    mid-conversation routing ("text the user the result on iMessage").
+    Returns {sent, ...} on success or {sent: False, error: "..."}.
+    """
+    channel = (channel or "").strip().lower()
+    recipient = (recipient or "").strip()
+    text = (text or "").strip()
+    if not channel or not recipient or not text:
+        return {"sent": False, "error": "channel, recipient, and text are all required"}
+
+    try:
+        from messaging import get_bridge, list_bridges
+    except Exception as exc:
+        return {"sent": False, "error": f"messaging module not importable: {exc}"}
+
+    bridge = get_bridge(channel)
+    if bridge is None:
+        return {
+            "sent": False,
+            "error": f"no bridge registered for {channel!r}; live bridges: {list_bridges()}",
+        }
+    try:
+        return bridge.send(recipient, text)
+    except Exception as exc:
+        return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
 
 
 def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict[str, Any]:

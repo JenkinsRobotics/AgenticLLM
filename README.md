@@ -124,29 +124,60 @@ Each run gets a `mode_tag` (`default` / `mcp` / `think` / `mcp+think`) in `bench
 
 Two prompts in the default set play audio out loud (`read bench.txt out loud`, `narrate youtube_intro.txt`). Skip them by passing a smaller prompt list if you don't want TTS during benchmarking.
 
-## Tools
+## Run the robot
 
-Both frameworks expose the same 15 tools (11 in-process + 4 unified-memory tools added below). File ops are confined to each framework's own `workspace/` — even if you ask the model to "save to Desktop," it lands in the workspace and the reply tells you where it actually went. Memory lives in a shared `memory/` directory at the project root so every interface sees the same identity and facts.
+Once `pip install -r requirements.txt` succeeds and `agent_doctor.py` is green, you have four ways to talk to the same agent:
 
-| Tool | Args | Purpose | Default mode |
-|---|---|---|---|
-| `get_time` | optional `timezone` (IANA) | Current date/time, optionally in a given timezone | fast |
-| `create_file` | `path`, `content` | Write a text file (overwrites) | natural |
-| `append_file` | `path`, `content` | Append to an existing file | natural |
-| `delete_file` | `path` | Delete a file in the workspace | natural |
-| `read_file` | `path` | Read a text file | fast |
-| `list_directory` | `path` | List a directory | fast |
-| `system_status` | — | CPU / disk / load | fast |
-| `calculate` | `expression` | Safe arithmetic via AST eval (no `eval()`) | fast |
-| `speak` | `text` | Kokoro TTS through default audio output | fast |
-| `speak_file` | `path` | Read a file and speak it (single-call narration) | fast |
-| `web_search` | `query` | DuckDuckGo via `ddgs`, no API key | natural |
-| `remember` | `key`, `value` | Save a fact to shared `memory/facts.json` | fast |
-| `recall` | `key` | Look up a previously stored fact | fast |
-| `list_facts` | — | List every fact currently in memory | fast |
-| `forget` | `key` | Remove a stored fact | fast |
+```bash
+# 1. Headless CLI — type to it
+.venv/bin/python main.py python_pydantic_ai
 
-`fast` mode returns the raw tool result without a second LLM call. `natural` mode runs `finalize` so the answer is a short natural-language summary. Override either with `--mode fast` / `--mode natural`.
+# 2. Voice — wake word "hey jaeger", full-duplex AEC, barge-in supported
+.venv/bin/python voice_assistant.py
+# (or, restart-on-crash for unattended:)
+.venv/bin/python supervisor.py -- .venv/bin/python voice_assistant.py
+
+# 3. Messaging — bidirectional Discord / Telegram / iMessage daemon
+export DISCORD_BOT_TOKEN='...'                          # https://discord.com/developers/applications
+export DISCORD_ALLOWED_USER_IDS='123,456'               # comma-separated user IDs
+export TELEGRAM_BOT_TOKEN='...'                         # talk to @BotFather on Telegram
+export TELEGRAM_ALLOWED_CHAT_IDS='789,234'              # comma-separated chat IDs
+export IMESSAGE_ALLOWED_HANDLES='+15551234567,you@me.com'  # macOS, needs Full Disk Access
+.venv/bin/python -m messaging.gateway
+
+# 4. Schedule it — agent calls schedule_prompt; CronRunner fires unattended
+#    (started automatically inside voice_assistant.py and messaging.gateway)
+```
+
+Every surface shares the same memory, the same skills, and the same in-process Gemma. The `CronRunner` claims due schedules atomically via fcntl flock so two channels can't double-fire.
+
+**Outbound from the agent:** all bridges that successfully start register in a shared registry. The `send_message(channel, recipient, text)` tool lets the agent — or a scheduled prompt — push a message to any live channel without being prompted first. Example: `schedule_prompt("0 7 * * *", "send the weather for Indianapolis to telegram chat 234567")` → every 7 AM the cron runner fires that prompt → agent looks up weather → calls `send_message("telegram", "234567", "...")` → done.
+
+## Tools (28 in `python_pydantic_ai`, 19 in the other two)
+
+File ops are confined to each framework's own `workspace/` — even if you ask the model to "save to Desktop," it lands in the workspace and the reply tells you where it actually went. Memory lives in a shared `memory/` directory at the project root so every interface (chat, voice, Discord, iMessage) sees the same identity and facts.
+
+| Category | Tools | Notes |
+|---|---|---|
+| **Time / math / state** | `get_time`, `calculate`, `system_status` | skip-final → tool result IS the answer |
+| **Workspace files** | `create_file`, `append_file`, `delete_file`, `read_file`, `list_directory` | sandboxed; `delete_file` gates on `confirm=True` when `DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1` |
+| **Speech** | `speak`, `speak_file` | Kokoro TTS, fully offline |
+| **Web** | `web_search`, `get_weather` | DuckDuckGo + wttr.in; no API key |
+| **Host control** | `launch_url`, `open_file`, `open_app` | macOS only |
+| **Memory (k/v + log)** | `remember`, `recall`, `list_facts`, `forget` | shared `memory/facts.json`; `forget` is approval-gated |
+| **Memory (semantic)** ⭐ | `search_memory(query, k)` | sentence-transformers index over `memory/episodic.jsonl` |
+| **Code execution** ⭐ | `run_python(code, timeout_s)` | sandboxed subprocess, 10 s timeout, tempdir |
+| **Vision** ⭐ | `look_at(image_path, question)` | lazy Moondream2 VLM, CPU |
+| **Image gen** ⭐ | `generate_image(prompt, out_path, …)` | lazy SDXL-Turbo, MPS |
+| **Clarify** ⭐ | `ask_user(question)` | voice loop speaks it, next phrase is the answer |
+| **Scheduling** ⭐ | `schedule_prompt(cron, prompt, name)`, `list_schedules`, `cancel_schedule` | fired by `CronRunner` inside `voice_assistant.py` or `messaging.gateway` |
+| **Delegation** ⭐ | `delegate(subtask)` | spawns a fresh sub-agent, depth-limited |
+
+⭐ added in Sprint 1–3. The first three frameworks share the 19 core tools; the ⭐ tools are `python_pydantic_ai`-only.
+
+### Skip-final optimization
+
+Tools whose dict result *is* the user-facing answer are listed in `SKIP_FINAL_TOOLS` (in [python_pydantic_ai/main.py](python_pydantic_ai/main.py)). When the agent picks one of these AND it's the only tool call in the turn, we intercept after the tool returns and **skip the would-be "final-answer" LLM call** — saves ~280 ms per simple command (3× faster on calc/time/etc.).
 
 ## Project structure
 
@@ -178,16 +209,41 @@ AgenticLLM/
 │   ├── README.md        # demo quickstart
 │   └── upstream/        # the cloned framework (gitignored — re-derived by setup.sh)
 ├── voice_assistant.py  # AEC + barge-in voice loop; framework swappable via VOICE_FRAMEWORK
-├── memory/             # Unified memory — shared across the first three frameworks
+├── agent_doctor.py     # Pre-flight health check (14 checks; exits non-zero on FAIL)
+├── supervisor.py       # Restart-on-crash wrapper with exponential backoff
+├── voice_validation.py # 14-check end-to-end contract test for the voice loop
+├── messaging/          # Remote messaging gateways (shared agent across channels)
+│   ├── gateway.py       # Daemon: loads agent once + starts every configured adapter
+│   ├── discord_bridge.py # DM + @mention adapter (DISCORD_BOT_TOKEN)
+│   └── imessage_bridge.py # chat.db poll + AppleScript send (IMESSAGE_ALLOWED_HANDLES)
+├── memory/             # Unified memory — shared across all interfaces
 │   ├── identity.md      # Stable persona, prepended to every system prompt
-│   ├── facts.json       # Atomic key/value scratchpad
-│   └── memory_module.py # Shared read/write helpers
+│   ├── facts.json       # Atomic key/value (schema_version=1, fcntl-locked)
+│   ├── episodic.jsonl   # Append-only cross-session turn log
+│   ├── schedules.jsonl  # Append-only cron schedule log
+│   ├── memory_module.py # Read/write helpers + semantic search index
+│   ├── cron_runner.py   # Background thread that fires due schedules
+│   └── maintenance.py   # `python -m memory.maintenance --all` for log/episodic rotation
 ├── mcp_bridge.py       # Opt-in MCP client (--with-mcp)
 ├── mcp_config.json     # MCP servers to connect to when MCP is enabled
 ├── thinking_runner.py  # Opt-in background thinking (--think)
-├── thinking.jsonl      # Background thinking log (written when --think runs)
-└── docs/               # PROJECT.md, ARCHITECTURE.md, BENCHMARKING.md, SETUP.md, TODO.md
+├── bench_all.py        # 4-way side-by-side bench (5 curated prompts)
+├── bench_runs/         # Per-step bench snapshots (gitignored, regenerable)
+└── docs/               # FRAMEWORKS.md, ARCHITECTURE.md, BENCHMARKING.md, SETUP.md, TODO.md
 ```
+
+## Production checklist (the shipping posture)
+
+| concern | mechanism | env var / command |
+|---|---|---|
+| Pre-flight health check | 14 checks: model file, deps, memory, audio, … | `python agent_doctor.py` (exits 0/1) |
+| Crash recovery | exponential backoff + per-crash log | `python supervisor.py -- python voice_assistant.py` |
+| Approval gate on destructive ops | `delete_file` / `forget` preview unless `confirm=True` | `DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1` (auto-set by voice/gateway) |
+| Memory schema version + cross-process flock | `facts.json`, `schedules.jsonl` use fcntl LOCK_EX | automatic |
+| Log rotation + episodic archive | rotate `>10 MB`, move old turns to `memory/archive/` | `python -m memory.maintenance --all` |
+| Cold-cache prewarm | one trivial turn at load time | automatic (`prewarm()` in load path) |
+| Cron scheduling (single-claim) | `claim_due_schedules` uses file lock | started by `voice_assistant.py` or `messaging.gateway` |
+| Contract test for new tools | exercises every tool through `run_for_voice` | `python voice_validation.py` |
 
 ## Performance notes
 

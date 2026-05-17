@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 import platform
@@ -78,7 +79,14 @@ def check_disk_free() -> tuple[str, str]:
 
 
 def check_deps() -> tuple[str, str]:
+    """Core deps (FAIL if missing) + optional deps (just note them)."""
     required = ["llama_cpp", "pydantic_ai", "kokoro", "sounddevice", "webrtcvad", "pyaec", "scipy", "numpy"]
+    optional = {
+        "sentence_transformers": "semantic memory search",
+        "transformers": "look_at (vision)",
+        "diffusers": "generate_image",
+        "discord": "Discord messaging bridge",
+    }
     missing: list[str] = []
     for mod in required:
         try:
@@ -86,8 +94,15 @@ def check_deps() -> tuple[str, str]:
         except Exception:
             missing.append(mod)
     if missing:
-        return FAIL, f"missing: {', '.join(missing)}"
-    return OK, f"all {len(required)} required modules importable"
+        return FAIL, f"missing required: {', '.join(missing)}"
+    opt_present = [
+        f"{name} ({purpose})" for name, purpose in optional.items()
+        if importlib.util.find_spec(name) is not None
+    ]
+    detail = f"all {len(required)} core deps OK"
+    if opt_present:
+        detail += f"; optional: {len(opt_present)} present"
+    return OK, detail
 
 
 def check_memory_files() -> tuple[str, str]:
@@ -167,6 +182,27 @@ def check_audio_devices() -> tuple[str, str]:
     return OK, f"in={in_name[:30]}, out={out_name[:30]}"
 
 
+def check_schedules() -> tuple[str, str]:
+    from memory.memory_module import list_schedules, SCHEDULES_PATH
+
+    if not SCHEDULES_PATH.exists():
+        return OK, "schedules.jsonl absent (no cron jobs scheduled)"
+    live = list_schedules()
+    if not live:
+        return OK, "schedules.jsonl present, 0 live entries"
+    return OK, f"{len(live)} live schedule(s): {', '.join(s.get('name','?') for s in live[:3])}"
+
+
+def check_embed_cache() -> tuple[str, str]:
+    from memory.memory_module import EMBED_PATH, EPISODIC_PATH
+
+    if not EPISODIC_PATH.exists():
+        return OK, "episodic.jsonl absent (no semantic-search index needed yet)"
+    if not EMBED_PATH.exists():
+        return OK, "no embedding cache yet (built on first `search_memory` call)"
+    return OK, f"embedding cache: {EMBED_PATH.stat().st_size / 1024:.0f} KB"
+
+
 def check_workspace() -> tuple[str, str]:
     ws = PROJECT_ROOT / "python_pydantic_ai" / "workspace"
     if not ws.exists():
@@ -194,6 +230,8 @@ CHECKS: list[tuple[str, Callable[[], tuple[str, str]]]] = [
     ("python deps", check_deps),
     ("memory files", check_memory_files),
     ("memory schema", check_memory_schema),
+    ("schedules", check_schedules),
+    ("embedding cache", check_embed_cache),
     ("log sizes", check_log_sizes),
     ("MCP config", check_mcp_config),
     ("audio devices", check_audio_devices),

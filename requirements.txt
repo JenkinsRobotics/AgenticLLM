@@ -15,3 +15,25 @@ sounddevice>=0.4.6
 numpy>=1.26
 scipy>=1.11
 torch>=2.2
+
+# voice_assistant.py — full-duplex audio with Speex AEC + WebRTC VAD.
+# `webrtcvad-wheels` ships prebuilt arm64/x86_64 wheels and provides the
+# same `webrtcvad` import; avoids the C build that the original sdist needs.
+pyaec>=1.0
+webrtcvad-wheels>=2.0
+
+# python_pydantic_ai/ — production agent framework.
+pydantic-ai>=1.0
+
+# Optional: enables ⭐ Sprint 2/3 tools. The agent registers them
+# regardless; first call lazy-loads the underlying model.
+sentence-transformers>=5.0   # search_memory (semantic recall)
+transformers>=4.40           # look_at (Moondream2 VLM)
+diffusers>=0.30              # generate_image (SDXL-Turbo)
+accelerate>=1.0              # diffusers' MPS backend
+
+# Optional: messaging gateways. Each adapter no-ops if its deps / creds
+# are missing; you only need the libraries for the channels you'll use.
+discord.py>=2.4              # Discord adapter
+python-telegram-bot>=20      # Telegram adapter (long-polling — no public URL needed)
+# iMessage adapter has no pip dep — uses stdlib sqlite3 + osascript.
