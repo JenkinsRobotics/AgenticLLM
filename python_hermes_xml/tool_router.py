@@ -101,7 +101,7 @@ def _is_mcp_tool(name: str) -> bool:
     if not name.startswith("mcp:"):
         return False
     try:
-        import mcp_bridge
+        from . import mcp_bridge
     except ImportError:
         return False
     reg = mcp_bridge.get_registry()
@@ -191,7 +191,7 @@ def run_tool(decision: ToolDecision) -> dict[str, Any]:
     if decision.tool is None:
         raise ValueError("no tool to run")
     if decision.tool.startswith("mcp:"):
-        import mcp_bridge
+        from . import mcp_bridge
 
         return mcp_bridge.call_mcp_tool(decision.tool, decision.args)
     return SAFE_TOOLS[decision.tool](**decision.args)

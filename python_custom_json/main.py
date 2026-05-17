@@ -28,7 +28,7 @@ def _build_base_system_prompt(with_identity: bool = False) -> str:
     if not with_identity:
         return prompts.SYSTEM_PROMPT
     try:
-        from memory.memory_module import load_identity
+        from .memory.memory_module import load_identity
 
         identity = load_identity()
     except Exception:
@@ -137,7 +137,7 @@ def _record_turn(entry: dict[str, Any]) -> None:
         del _session_history[:overflow]
 
     try:
-        from memory.memory_module import append_episodic
+        from .memory.memory_module import append_episodic
 
         append_episodic({
             "timestamp": entry.get("timestamp"),
@@ -515,7 +515,7 @@ def init_extensions(args, client) -> None:
         # Preload the last few turns from the cross-session episodic log so
         # the model has conversational context even on a fresh process start.
         try:
-            from memory.memory_module import load_recent_turns
+            from .memory.memory_module import load_recent_turns
 
             recent = load_recent_turns(n=5)
             if recent:
@@ -531,7 +531,7 @@ def init_extensions(args, client) -> None:
 
     if with_mcp:
         try:
-            import mcp_bridge
+            from . import mcp_bridge
 
             registry = mcp_bridge.init_from_config()
             specs = registry.list_tools()
@@ -539,7 +539,7 @@ def init_extensions(args, client) -> None:
                 extra = [(s.qualified_name, s.description) for s in specs]
                 # Rebuild the system prompt so identity stays prepended.
                 try:
-                    from memory.memory_module import load_identity
+                    from .memory.memory_module import load_identity
 
                     identity = load_identity()
                 except Exception:
@@ -554,7 +554,7 @@ def init_extensions(args, client) -> None:
 
     if with_thinking:
         try:
-            import thinking_runner
+            from . import thinking_runner
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock

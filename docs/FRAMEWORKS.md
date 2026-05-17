@@ -17,7 +17,7 @@ Four different agent implementations all driving the same local Gemma 4 26B-A4B 
 | Bench warm latency | ~0.5–0.7 s | ~0.5–0.7 s | **~0.3–0.5 s** (skip-final) | ~0.6–1.0 s (HTTP overhead) |
 | Voice integration | — | `VOICE_FRAMEWORK=hermes_xml` | default in `voice_assistant.py` | not wired (its own gateway) |
 
-Numbers above are warm-cache decision phase for a single-tool prompt. Bench history is in [BENCH_RESULTS.md](BENCH_RESULTS.md).
+Numbers above are warm-cache decision phase for a single-tool prompt. Bench history is in [../benchmark/BENCH_RESULTS.md](../benchmark/BENCH_RESULTS.md).
 
 ## 1. `python_custom_json/` — JSON + GBNF grammar
 
@@ -99,7 +99,7 @@ python_hermes_agent/start_llm.sh &      # background or separate terminal
 VOICE_FRAMEWORK=hermes_xml .venv/bin/python voice_assistant.py # → hermes_xml
 
 # Bench the in-process three head-to-head:
-.venv/bin/python bench.py
+.venv/bin/python benchmark/bench.py
 ```
 
-The bench currently covers the three in-process frameworks (they share the same `bench.py` interface). `python_hermes_agent/run_prompt.py` is the start of bench-equivalence for the fourth — the prompt-list loop is straightforward to add later if we want it in `bench_history.jsonl`.
+The bench currently covers the three in-process frameworks (they share the same `benchmark/bench.py` interface). `python_hermes_agent/run_prompt.py` is the start of bench-equivalence for the fourth — the prompt-list loop is straightforward to add later if we want it in `benchmark/bench_history.jsonl`.

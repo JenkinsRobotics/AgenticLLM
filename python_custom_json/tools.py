@@ -311,7 +311,7 @@ def speak_file(path: str) -> dict[str, Any]:
 
 def remember(key: str, value: str) -> dict[str, Any]:
     """Store a fact in unified memory shared across all agent processes."""
-    from memory.memory_module import remember as _remember
+    from .memory.memory_module import remember as _remember
 
     _remember(key, value)
     return {"remembered": True, "key": key, "value": value}
@@ -319,7 +319,7 @@ def remember(key: str, value: str) -> dict[str, Any]:
 
 def recall(key: str) -> dict[str, Any]:
     """Retrieve a fact previously stored via remember()."""
-    from memory.memory_module import recall as _recall
+    from .memory.memory_module import recall as _recall
 
     value = _recall(key)
     if value is None:
@@ -329,7 +329,7 @@ def recall(key: str) -> dict[str, Any]:
 
 def forget(key: str) -> dict[str, Any]:
     """Remove a stored fact. Returns whether it existed."""
-    from memory.memory_module import forget as _forget
+    from .memory.memory_module import forget as _forget
 
     existed = _forget(key)
     return {"forgotten": existed, "key": key}
@@ -337,7 +337,7 @@ def forget(key: str) -> dict[str, Any]:
 
 def list_facts() -> dict[str, Any]:
     """List every fact currently stored in unified memory."""
-    from memory.memory_module import list_facts as _list_facts
+    from .memory.memory_module import list_facts as _list_facts
 
     return {"facts": _list_facts()}
 

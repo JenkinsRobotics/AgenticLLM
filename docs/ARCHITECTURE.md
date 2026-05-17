@@ -302,12 +302,12 @@ trivial tool calls.
 | `main.py`                           | Dispatcher: import + call the chosen framework       |
 | `bench.py`                          | Head-to-head runner, history aggregator              |
 | `memory/memory_module.py`           | Shared persistent memory (identity + facts)          |
-| `memory/identity.md`                | Stable persona, prepended to every system prompt     |
-| `memory/facts.json`                 | Atomic key/value store for the agent's curated facts |
-| `mcp_bridge.py`                     | Opt-in MCP client + async-to-sync bridge             |
-| `mcp_config.json`                   | List of MCP servers to connect to when --with-mcp    |
-| `thinking_runner.py`                | Opt-in background thinking runner                    |
-| `thinking.jsonl`                    | Per-turn background thinking log                     |
+| `<fw>/memory/identity.md`           | Stable persona, prepended to every system prompt     |
+| `<fw>/memory/facts.json`            | Atomic key/value store for the agent's curated facts |
+| `<fw>/mcp_bridge.py`                | Opt-in MCP client + async-to-sync bridge             |
+| `<fw>/mcp_config.json`              | List of MCP servers to connect to when --with-mcp    |
+| `<fw>/thinking_runner.py`           | Opt-in background thinking runner                    |
+| `<fw>/thinking.jsonl`               | Per-turn background thinking log                     |
 | `<fw>/main.py`                      | `decide` / `finalize` / `run_command` / `cli_loop`   |
 | `<fw>/prompts.py`                   | System prompt; tool descriptions or JSON schemas     |
 | `<fw>/tool_router.py`               | `SAFE_TOOLS`, `TOOL_DEFAULT_MODE`, parser, grammar   |

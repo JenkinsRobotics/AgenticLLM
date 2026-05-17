@@ -106,7 +106,7 @@ def check_deps() -> tuple[str, str]:
 
 
 def check_memory_files() -> tuple[str, str]:
-    from memory.memory_module import FACTS_PATH, IDENTITY_PATH, EPISODIC_PATH, _read_facts
+    from python_pydantic_ai.memory.memory_module import FACTS_PATH, IDENTITY_PATH, EPISODIC_PATH, _read_facts
 
     facts = _read_facts()
     fact_count = len(facts)
@@ -120,7 +120,7 @@ def check_memory_files() -> tuple[str, str]:
 
 
 def check_memory_schema() -> tuple[str, str]:
-    from memory.memory_module import FACTS_PATH, SCHEMA_VERSION
+    from python_pydantic_ai.memory.memory_module import FACTS_PATH, SCHEMA_VERSION
 
     if not FACTS_PATH.exists():
         return OK, "facts.json absent (fresh install)"
@@ -139,7 +139,7 @@ def check_memory_schema() -> tuple[str, str]:
 
 
 def check_log_sizes() -> tuple[str, str]:
-    from memory.maintenance import LATENCY_LOG_PATHS, DEFAULT_MAX_BYTES
+    from python_pydantic_ai.memory.maintenance import LATENCY_LOG_PATHS, DEFAULT_MAX_BYTES
 
     over: list[str] = []
     sizes: list[str] = []
@@ -156,7 +156,10 @@ def check_log_sizes() -> tuple[str, str]:
 
 
 def check_mcp_config() -> tuple[str, str]:
-    cfg = PROJECT_ROOT / "mcp_config.json"
+    # After the per-framework split, mcp_config.json lives inside each
+    # framework that uses MCP. The doctor checks pydantic_ai's copy (the
+    # recommended framework) as the canonical view.
+    cfg = PROJECT_ROOT / "python_pydantic_ai" / "mcp_config.json"
     if not cfg.exists():
         return OK, "mcp_config.json absent (MCP off)"
     try:
@@ -183,7 +186,7 @@ def check_audio_devices() -> tuple[str, str]:
 
 
 def check_schedules() -> tuple[str, str]:
-    from memory.memory_module import list_schedules, SCHEDULES_PATH
+    from python_pydantic_ai.memory.memory_module import list_schedules, SCHEDULES_PATH
 
     if not SCHEDULES_PATH.exists():
         return OK, "schedules.jsonl absent (no cron jobs scheduled)"
@@ -194,7 +197,7 @@ def check_schedules() -> tuple[str, str]:
 
 
 def check_embed_cache() -> tuple[str, str]:
-    from memory.memory_module import EMBED_PATH, EPISODIC_PATH
+    from python_pydantic_ai.memory.memory_module import EMBED_PATH, EPISODIC_PATH
 
     if not EPISODIC_PATH.exists():
         return OK, "episodic.jsonl absent (no semantic-search index needed yet)"

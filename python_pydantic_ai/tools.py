@@ -349,7 +349,7 @@ def speak_file(path: str) -> dict[str, Any]:
 
 def remember(key: str, value: str) -> dict[str, Any]:
     """Store a fact in unified memory shared across all agent processes."""
-    from memory.memory_module import remember as _remember
+    from .memory.memory_module import remember as _remember
 
     _remember(key, value)
     return {"remembered": True, "key": key, "value": value}
@@ -357,7 +357,7 @@ def remember(key: str, value: str) -> dict[str, Any]:
 
 def recall(key: str) -> dict[str, Any]:
     """Retrieve a fact previously stored via remember()."""
-    from memory.memory_module import recall as _recall
+    from .memory.memory_module import recall as _recall
 
     value = _recall(key)
     if value is None:
@@ -372,7 +372,7 @@ def forget(key: str, confirm: bool = False) -> dict[str, Any]:
     DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1, the first call previews and the
     agent must call `ask_user` + then call again with `confirm=True`.
     """
-    from memory.memory_module import forget as _forget, recall as _recall
+    from .memory.memory_module import forget as _forget, recall as _recall
 
     if _destructive_confirm_required() and not confirm:
         existing = _recall(key)
@@ -392,7 +392,7 @@ def forget(key: str, confirm: bool = False) -> dict[str, Any]:
 
 def list_facts() -> dict[str, Any]:
     """List every fact currently stored in unified memory."""
-    from memory.memory_module import list_facts as _list_facts
+    from .memory.memory_module import list_facts as _list_facts
 
     return {"facts": _list_facts()}
 
@@ -775,7 +775,7 @@ def send_message(channel: str, recipient: str, text: str) -> dict[str, Any]:
         return {"sent": False, "error": "channel, recipient, and text are all required"}
 
     try:
-        from messaging import get_bridge, list_bridges
+        from .messaging import get_bridge, list_bridges
     except Exception as exc:
         return {"sent": False, "error": f"messaging module not importable: {exc}"}
 
@@ -800,7 +800,7 @@ def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dic
     memory updates, and TTS all behave the same. Use `list_schedules` /
     `cancel_schedule` to inspect and remove entries.
     """
-    from memory.memory_module import add_schedule
+    from .memory.memory_module import add_schedule
 
     try:
         row = add_schedule(cron_expr=cron_expr, prompt=prompt, name=name)
@@ -811,7 +811,7 @@ def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dic
 
 def list_schedules() -> dict[str, Any]:
     """List every active scheduled prompt with its next-run timestamp."""
-    from memory.memory_module import list_schedules as _ls
+    from .memory.memory_module import list_schedules as _ls
 
     rows = _ls()
     return {"count": len(rows), "schedules": rows}
@@ -819,7 +819,7 @@ def list_schedules() -> dict[str, Any]:
 
 def cancel_schedule(name: str) -> dict[str, Any]:
     """Remove a previously-scheduled prompt by name."""
-    from memory.memory_module import cancel_schedule as _cs
+    from .memory.memory_module import cancel_schedule as _cs
 
     ok = _cs(name)
     return {"cancelled": ok, "name": name}
@@ -834,7 +834,7 @@ def search_memory(query: str, k: int = 5) -> dict[str, Any]:
 
     Returns the top-k most relevant past turns with cosine scores.
     """
-    from memory.memory_module import search_memory as _search
+    from .memory.memory_module import search_memory as _search
 
     clean = (query or "").strip()
     if not clean:

@@ -268,7 +268,7 @@ def _record_turn(entry: dict[str, Any]) -> None:
     if not user:
         return
     try:
-        from memory.memory_module import append_episodic
+        from .memory.memory_module import append_episodic
 
         append_episodic({
             "timestamp": entry.get("timestamp"),
@@ -300,7 +300,7 @@ def _get_session_history(session_key: str) -> list[Any]:
     if session_key not in _session_loaded:
         _session_loaded.add(session_key)
         try:
-            from memory.memory_module import load_recent_turns
+            from .memory.memory_module import load_recent_turns
 
             recent_dicts = load_recent_turns(n=5, session_key=session_key)
             if recent_dicts:
@@ -338,7 +338,7 @@ def _build_mcp_tools(specs: list[Any]) -> list[Tool]:
 
         def _make_caller(qualified_name: str):
             def _call(**kwargs: Any) -> dict[str, Any]:
-                import mcp_bridge
+                from . import mcp_bridge
 
                 return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
 
@@ -1233,7 +1233,7 @@ def init_extensions(args, client) -> None:
 
     # --- User-facing display config (memory/config.json) -----------------------
     try:
-        from memory import config as user_config
+        from .memory import config as user_config
 
         cfg = user_config.load()
         display = cfg.get("display") or {}
@@ -1246,7 +1246,7 @@ def init_extensions(args, client) -> None:
     # --- Memory: identity injection (per-session history is lazy-loaded) -----
     if with_memory:
         try:
-            from memory.memory_module import load_identity
+            from .memory.memory_module import load_identity
 
             identity = load_identity()
             if identity:
@@ -1262,7 +1262,7 @@ def init_extensions(args, client) -> None:
     # --- MCP: load bridge + record specs (agent will be rebuilt by _get_agent) ---
     if with_mcp:
         try:
-            import mcp_bridge
+            from . import mcp_bridge
 
             registry = mcp_bridge.init_from_config()
             specs = registry.list_tools()
@@ -1278,7 +1278,7 @@ def init_extensions(args, client) -> None:
     # --- Thinking: background runner with shared LLM lock -----------------------
     if with_thinking:
         try:
-            import thinking_runner
+            from . import thinking_runner
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock
@@ -1415,7 +1415,7 @@ def _handle_slash_command(cmd: str) -> bool:
         return True
     if head == "/setup":
         try:
-            from memory import config as user_config
+            from .memory import config as user_config
 
             user_config.run_wizard(force=True)
             cfg = user_config.load()
@@ -1534,7 +1534,7 @@ def main() -> int:
     # First-time setup: if memory/config.json doesn't exist yet, run the
     # wizard for interactive sessions, fall back to defaults otherwise.
     try:
-        from memory import config as user_config
+        from .memory import config as user_config
 
         user_config.ensure_configured(prompt_if_missing=is_interactive)
     except Exception as exc:

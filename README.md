@@ -11,7 +11,7 @@ A fast local agentic LLM harness on macOS. **Four agents**, all running the same
 
 The first three load the model in-process and answer to a strict per-prompt latency budget (warm-cache routing in 0.3–0.5 s). The fourth runs the model behind an HTTP boundary so a much larger, self-improving agent system can drive it — same offline LLM, very different agent philosophy.
 
-See [docs/FRAMEWORKS.md](docs/FRAMEWORKS.md) for a side-by-side breakdown, [BENCHMARK.md](BENCHMARK.md) for the live 3-way latency table (auto-updated for the in-process trio), and [BENCHMARK_4WAY.md](BENCHMARK_4WAY.md) for the curated 5-prompt run that includes `python_hermes_agent` head-to-head.
+See [docs/FRAMEWORKS.md](docs/FRAMEWORKS.md) for a side-by-side breakdown, [benchmark/BENCHMARK.md](benchmark/BENCHMARK.md) for the live 3-way latency table (auto-updated for the in-process trio), and [benchmark/BENCHMARK_4WAY.md](benchmark/BENCHMARK_4WAY.md) for the curated 5-prompt run that includes `python_hermes_agent` head-to-head.
 
 **Why each one is useful:**
 - **`python_pydantic_ai`** is our recommendation for the robot agent: type-safe tool arguments (bad coords get rejected before they hit motors), automatic `ModelRetry` on bad output, and the skip-final optimization makes simple commands 3× faster than the others. This is what `voice_assistant.py` defaults to.
@@ -111,16 +111,16 @@ Useful for scripting or running a fixed prompt without the interactive loop.
 ### Head-to-head benchmark
 
 ```bash
-.venv/bin/python bench.py                       # default mode
-.venv/bin/python bench.py --with-mcp            # adds opt-in MCP prompts
-.venv/bin/python bench.py --think               # adds background thinking
-.venv/bin/python bench.py --only python_custom_json       # one framework only
-.venv/bin/python bench.py --prompts file.txt    # custom prompt list
-.venv/bin/python bench.py --skip-run            # re-summarize existing logs
-.venv/bin/python bench.py --history             # trend view across runs
+.venv/bin/python benchmark/bench.py                       # default mode
+.venv/bin/python benchmark/bench.py --with-mcp            # adds opt-in MCP prompts
+.venv/bin/python benchmark/bench.py --think               # adds background thinking
+.venv/bin/python benchmark/bench.py --only python_custom_json       # one framework only
+.venv/bin/python benchmark/bench.py --prompts file.txt    # custom prompt list
+.venv/bin/python benchmark/bench.py --skip-run            # re-summarize existing logs
+.venv/bin/python benchmark/bench.py --history             # trend view across runs
 ```
 
-Each run gets a `mode_tag` (`default` / `mcp` / `think` / `mcp+think`) in `bench_history.jsonl` so trends compare cleanly. Two default prompts play audio (`read bench.txt`, `narrate youtube_intro.txt`); pass a smaller prompt list to skip TTS.
+Each run gets a `mode_tag` (`default` / `mcp` / `think` / `mcp+think`) in `benchmark/bench_history.jsonl` so trends compare cleanly. Two default prompts play audio (`read bench.txt`, `narrate youtube_intro.txt`); pass a smaller prompt list to skip TTS.
 
 Two prompts in the default set play audio out loud (`read bench.txt out loud`, `narrate youtube_intro.txt`). Skip them by passing a smaller prompt list if you don't want TTS during benchmarking.
 
@@ -184,7 +184,15 @@ Tools whose dict result *is* the user-facing answer are listed in `SKIP_FINAL_TO
 ```
 AgenticLLM/
 ├── main.py             # Dispatcher: python main.py [python_custom_json|python_hermes_xml] [prompt]
-├── bench.py            # Head-to-head benchmark + comparison table
+├── benchmark/          # All bench scripts + history + result docs (see benchmark/BENCHMARKING.md)
+│   ├── bench.py          # Head-to-head 3-way bench + comparison table
+│   ├── bench_all.py      # 4-way side-by-side (5 curated prompts; includes hermes_agent)
+│   ├── bench_jaeger.py   # python_jaeger vs python_pydantic_ai parity check
+│   ├── bench_history.jsonl  # append-only per-run history
+│   ├── BENCHMARK.md      # auto-generated 3-way table
+│   ├── BENCHMARK_4WAY.md # auto-generated 4-way table
+│   ├── BENCH_RESULTS.md  # historical + per-mode breakdown
+│   └── BENCHMARKING.md   # how to run benchmarks and read history
 ├── requirements.txt
 ├── python_custom_json/ # OUR JSON + GBNF grammar framework (was "pygentic/")
 │   ├── main.py          # decide / finalize / CLI loop
@@ -226,10 +234,10 @@ AgenticLLM/
 │   └── maintenance.py   # `python -m memory.maintenance --all` for log/episodic rotation
 ├── mcp_bridge.py       # Opt-in MCP client (--with-mcp)
 ├── mcp_config.json     # MCP servers to connect to when MCP is enabled
-├── thinking_runner.py  # Opt-in background thinking (--think)
-├── bench_all.py        # 4-way side-by-side bench (5 curated prompts)
-├── bench_runs/         # Per-step bench snapshots (gitignored, regenerable)
-└── docs/               # FRAMEWORKS.md, ARCHITECTURE.md, BENCHMARKING.md, SETUP.md, TODO.md
+│   # Each in-process framework also owns its own thinking_runner.py +
+│   # thinking.jsonl (opt-in --think extension), mcp_bridge.py + mcp_config.json
+│   # (opt-in --with-mcp), and memory/ store.
+└── docs/               # FRAMEWORKS.md, ARCHITECTURE.md, AGENTIC_CODING_PRACTICE.md, SETUP.md, TODO.md
 ```
 
 ## Production checklist (the shipping posture)
@@ -255,14 +263,14 @@ A few non-obvious findings from running both frameworks side-by-side on Gemma 4 
 - **JSON-wrapping free-text answers is expensive.** Forcing every final answer through `{"final":"..."}` triples generation time for jokes/stories/titles vs plain text. Pygentic v2 could close this gap with a hybrid grammar that allows either a constrained tool-call block or unconstrained free text.
 - **TTS audio dominates wall-clock on narration prompts.** `speak_file` on a 4-sentence paragraph takes ~28s regardless of framework — that's the audio playback length, not LLM work.
 
-The latency reports in `latency.jsonl` carry TTFT + total time per stage so you can re-analyze any past run with `bench.py --skip-run` or your own scripts. Each bench run also appends an aggregate to `bench_history.jsonl` at the project root — see [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for how to read trends with `python bench.py --history`.
+The latency reports in `latency.jsonl` carry TTFT + total time per stage so you can re-analyze any past run with `bench.py --skip-run` or your own scripts. Each bench run also appends an aggregate to `benchmark/bench_history.jsonl` — see [benchmark/BENCHMARKING.md](benchmark/BENCHMARKING.md) for how to read trends with `python benchmark/bench.py --history`.
 
 ## Docs
 
 - [docs/FRAMEWORKS.md](docs/FRAMEWORKS.md) — full side-by-side of all four agents, when to use which
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, request pipeline, framework differences
-- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — running benchmarks, reading history, regression detection
-- [docs/BENCH_RESULTS.md](docs/BENCH_RESULTS.md) — latest numbers per mode + historical consistency view
+- [benchmark/BENCHMARKING.md](benchmark/BENCHMARKING.md) — running benchmarks, reading history, regression detection
+- [benchmark/BENCH_RESULTS.md](benchmark/BENCH_RESULTS.md) — latest numbers per mode + historical consistency view
 - [docs/PROJECT.md](docs/PROJECT.md) — high-level project overview
 - [docs/SETUP.md](docs/SETUP.md) — install and verification
 - [docs/TODO.md](docs/TODO.md) — open work

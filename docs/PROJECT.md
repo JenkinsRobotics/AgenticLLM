@@ -3,8 +3,8 @@
 High-level overview. For deep technical detail see:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, request pipeline, framework differences, key decisions
-- [BENCHMARKING.md](BENCHMARKING.md) — how to run benchmarks and read the history log
-- [BENCH_RESULTS.md](BENCH_RESULTS.md) — latest tracked numbers per mode + historical consistency view
+- [../benchmark/BENCHMARKING.md](../benchmark/BENCHMARKING.md) — how to run benchmarks and read the history log
+- [../benchmark/BENCH_RESULTS.md](../benchmark/BENCH_RESULTS.md) — latest tracked numbers per mode + historical consistency view
 - [SETUP.md](SETUP.md) — install and verification
 - [TODO.md](TODO.md) — open work
 
@@ -18,7 +18,7 @@ format are measurable head-to-head.
 ## Entry points
 
 - `main.py` — dispatcher: `python main.py [pygentic|hermes] [prompt]`
-- `bench.py` — head-to-head benchmark + history log (`bench.py --history`)
+- `benchmark/bench.py` — head-to-head benchmark + history log (`bench.py --history`)
 
 ## Frameworks
 
@@ -52,5 +52,5 @@ narration without speed cost.
 Every request appends to `<framework>/logs/latency.jsonl` with a UTC
 `timestamp` and an optional `run_id` (set during bench runs). Bench runs
 also append an aggregate per (framework, prompt) to
-`bench_history.jsonl` at the project root so trends are easy to read with
-`python bench.py --history`.
+`benchmark/bench_history.jsonl` so trends are easy to read with
+`python benchmark/bench.py --history`.
