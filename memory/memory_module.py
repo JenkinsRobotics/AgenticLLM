@@ -558,7 +558,7 @@ def mark_schedule_ran(name: str) -> None:
             fh.write(json.dumps(update, ensure_ascii=True) + "\n")
 
 
-def load_recent_turns(n: int = 5) -> list[dict[str, str]]:
+def load_recent_turns(n: int = 5, session_key: str | None = None) -> list[dict[str, str]]:
     """Return the last N turns as a flat chat-history list.
 
     Output shape is OpenAI-style messages — pairs of {"role":"user", ...} and
@@ -566,6 +566,10 @@ def load_recent_turns(n: int = 5) -> list[dict[str, str]]:
     decision (the JSON or <tool_call> the model emitted). That's enough for
     the model to see what keys/args it used in prior turns, which fixes the
     key-consistency issue without much prefill cost.
+
+    When `session_key` is provided, only turns logged with that key are
+    returned — used by the per-channel rolling-history feature so a
+    Telegram chat doesn't see CLI turns when the gateway restarts.
     """
     if not EPISODIC_PATH.exists() or n <= 0:
         return []
@@ -573,9 +577,12 @@ def load_recent_turns(n: int = 5) -> list[dict[str, str]]:
     with EPISODIC_PATH.open("r", encoding="utf-8") as handle:
         for line in handle:
             try:
-                entries.append(json.loads(line))
+                entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if session_key is not None and entry.get("session_key") != session_key:
+                continue
+            entries.append(entry)
     messages: list[dict[str, str]] = []
     for entry in entries[-n:]:
         user = entry.get("user")

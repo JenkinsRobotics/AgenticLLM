@@ -39,9 +39,15 @@ from memory.cron_runner import CronRunner
 
 
 def _make_handler(client: Any) -> "callable":
-    """Wrap run_for_voice into a sync `text -> reply` callback."""
-    def handler(text: str) -> str:
-        result = run_for_voice(client, text)
+    """Wrap run_for_voice into a sync `text -> reply` callback.
+
+    Each bridge passes its own `session_key` so the per-channel rolling
+    history stays isolated (Telegram chat A doesn't see Discord chat B,
+    etc.). Older bridges that haven't been upgraded still work — they
+    just hit the default key.
+    """
+    def handler(text: str, session_key: str | None = None) -> str:
+        result = run_for_voice(client, text, session_key=session_key)
         return (result.get("text") or "").strip()
     return handler
 
@@ -58,6 +64,16 @@ def main() -> int:
     # or memory without explicit user confirmation through the agent's
     # ask_user tool. Set the same env gate voice mode uses.
     os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
+
+    # Setup wizard / config push. If memory/config.json doesn't exist we
+    # offer the wizard interactively (Ctrl-C skips). Existing config is
+    # applied to env vars so the bridges below pick up tokens automatically.
+    try:
+        from memory import config as user_config
+
+        user_config.ensure_configured(prompt_if_missing=sys.stdin.isatty())
+    except Exception as exc:
+        print(f"[gateway] setup check skipped: {exc}", flush=True)
 
     print("[gateway] loading Gemma in-process...", flush=True)
     started = time.perf_counter()

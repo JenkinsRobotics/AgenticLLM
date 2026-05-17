@@ -83,6 +83,9 @@ SKIP_FINAL_TOOLS = frozenset({
     # send_message returns a tight {sent: bool, ...} that has a natural
     # one-line confirmation; no LLM summarization needed.
     "send_message",
+    # help_me returns a curated capability list; the LLM doesn't need to
+    # re-summarize it — the summary IS the answer.
+    "help_me",
 })
 
 
@@ -165,6 +168,16 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if result.get("sent"):
             return f"Sent."
         return f"Couldn't send: {result.get('error', 'unknown')}"
+    if name == "help_me":
+        summary = (result.get("summary") or "").strip()
+        cli = "\n".join(f"  {line}" for line in result.get("cli_commands") or [])
+        tip = (result.get("tip") or "").strip()
+        chunks = [summary]
+        if cli:
+            chunks.append(f"CLI commands:\n{cli}")
+        if tip:
+            chunks.append(tip)
+        return "\n\n".join(c for c in chunks if c)
     return str(result)
 
 
@@ -192,11 +205,25 @@ _pipeline: dict[str, Any] = {
     # tool schema (set by `prewarm`). Once True, the first user-facing
     # turn skips its cold-cache prefill penalty.
     "prewarmed": False,
+    # User-facing display preferences (filled in from memory/config.json at
+    # startup; toggled live via /latency, /tools, etc. slash commands).
+    "show_latency": False,
+    "show_tool_activity": True,
 }
 
 # Conversation history maintained across run_command calls (only populated
 # when --with-memory is on). Each element is a pydantic-ai ModelMessage.
-_session_history: list[Any] = []
+#
+# Per-session: keyed by an opaque session_key (e.g. "cli", "voice",
+# "telegram:12345", "discord:67890"). Each chat keeps its own ~20-message
+# rolling window so the Telegram bot's context never leaks into the CLI
+# loop (and vice versa) when both run in the same gateway process. On
+# first access, recent turns are lazy-loaded from episodic.jsonl filtered
+# to that session_key — so a process restart still feels like a continuous
+# chat to each individual user.
+_DEFAULT_SESSION_KEY = "cli"
+_session_histories: dict[str, list[Any]] = {}
+_session_loaded: set[str] = set()
 _MAX_HISTORY_MESSAGES = 20  # ~10 user+assistant pairs
 
 
@@ -246,6 +273,7 @@ def _record_turn(entry: dict[str, Any]) -> None:
         append_episodic({
             "timestamp": entry.get("timestamp"),
             "framework": "python_pydantic_ai",
+            "session_key": entry.get("session_key"),
             "user": user,
             "decision_raw": json.dumps(entry.get("decision"), ensure_ascii=True, default=str)
                 if entry.get("decision") is not None
@@ -255,6 +283,38 @@ def _record_turn(entry: dict[str, Any]) -> None:
         })
     except Exception as exc:
         print(f"[python_pydantic_ai] episodic append failed: {exc}", file=sys.stderr, flush=True)
+
+
+def _get_session_history(session_key: str) -> list[Any]:
+    """Return the in-memory history list for `session_key`, lazy-loading
+    that session's prior turns from episodic.jsonl on first access.
+
+    Only called when --with-memory is on (otherwise we always pass None to
+    the agent, no history mixing possible).
+    """
+    history = _session_histories.get(session_key)
+    if history is None:
+        history = []
+        _session_histories[session_key] = history
+
+    if session_key not in _session_loaded:
+        _session_loaded.add(session_key)
+        try:
+            from memory.memory_module import load_recent_turns
+
+            recent_dicts = load_recent_turns(n=5, session_key=session_key)
+            if recent_dicts:
+                history.extend(_episodic_to_messages(recent_dicts))
+                print(
+                    f"[python_pydantic_ai] resumed {session_key!r}: {len(recent_dicts)//2} prior turn(s) loaded.",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(
+                f"[python_pydantic_ai] resume for {session_key!r} skipped: {exc}",
+                file=sys.stderr, flush=True,
+            )
+    return history
 
 
 # ============================================================================
@@ -356,6 +416,12 @@ def build_agent(
     def system_status() -> dict:
         """Get current machine status (cpu, disk, load average)."""
         return tools.system_status()
+
+    @agent.tool_plain
+    def help_me() -> dict:
+        """Show what the agent can do — call when the user asks for help,
+        a capability overview, or "what can you do?" / "what tools do you have?"."""
+        return tools.help_me()
 
     @agent.tool_plain
     def delegate(subtask: str) -> dict:
@@ -756,12 +822,15 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     }
 
 
-def run_command(client: Any, user_text: str, default_mode: str) -> None:
+def run_command(client: Any, user_text: str, default_mode: str, session_key: str | None = None) -> None:
     """Compatible with bench.py's expected (client, user_text, mode) signature.
 
     `default_mode` is accepted for API parity but ignored — pydantic-ai
-    decides the loop dynamics on its own.
+    decides the loop dynamics on its own. `session_key` selects which
+    per-channel rolling history this turn uses; defaults to "cli".
     """
+    key = session_key or _DEFAULT_SESSION_KEY
+    history = _get_session_history(key) if _pipeline["with_memory"] else None
     agent = _get_agent(client)
     model: LlamaCppModel = agent.model  # type: ignore[assignment]
     model.reset_timings()
@@ -771,9 +840,9 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
     try:
         if lock is not None:
             with lock:
-                iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
+                iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
         else:
-            iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
+            iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
     except Exception as exc:
         elapsed = time.perf_counter() - started
         print(f"Pydantic AI agent failed: {exc}")
@@ -789,6 +858,7 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         print_latency(report)
         write_log({
             "user": user_text,
+            "session_key": key,
             "error": str(exc),
             "latency": asdict(report),
         })
@@ -830,18 +900,21 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         final_ttft=final_last if len(llm_times) > 1 else 0.0,
     )
 
-    for line in tool_activity:
-        print(line)
+    if _pipeline.get("show_tool_activity", True):
+        for line in tool_activity:
+            print(line)
     if answer:
         print(answer)
-    print_latency(report)
-    if skipped:
-        print("  (final-LLM skipped — tool result returned directly)")
-    if tool_calls > 1:
-        print(f"  (chained {tool_calls} tool calls)")
+    if _pipeline.get("show_latency", False):
+        print_latency(report)
+        if skipped:
+            print("  (final-LLM skipped — tool result returned directly)")
+        if tool_calls > 1:
+            print(f"  (chained {tool_calls} tool calls)")
 
     write_log({
         "user": user_text,
+        "session_key": key,
         "answer": answer,
         "tool_calls": tool_calls,
         "tool_activity": tool_activity,
@@ -850,21 +923,21 @@ def run_command(client: Any, user_text: str, default_mode: str) -> None:
         "latency": asdict(report),
     })
 
-    # Memory: append new messages to session history + queue background thinking
-    if _pipeline["with_memory"]:
+    # Memory: append new messages to this session's history + queue background thinking
+    if _pipeline["with_memory"] and history is not None:
         if skipped:
-            _session_history.extend(iter_out["skipped_msgs"])
-            overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+            history.extend(iter_out["skipped_msgs"])
+            overflow = len(history) - _MAX_HISTORY_MESSAGES
             if overflow > 0:
-                del _session_history[:overflow]
+                del history[:overflow]
         else:
-            _extend_session_history_from_result(result)
+            _extend_history_from_result(history, result)
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
 
 
-def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
+def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:
     """Voice-loop entry point.
 
     Same agent and session history as run_command, but returns a structured
@@ -872,7 +945,13 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
     through its own TTS pipeline — unless the agent already vocalized via a
     speak/speak_file tool call, in which case spoke_via_tool=True and the
     caller should skip its own TTS to avoid double-speaking.
+
+    `session_key` selects the per-channel rolling history. The voice loop
+    leaves it None → "voice"; messaging bridges pass channel-specific keys
+    like "telegram:12345" so each chat keeps its own context.
     """
+    key = session_key or "voice"
+    history = _get_session_history(key) if _pipeline["with_memory"] else None
     agent = _get_agent(client)
     model: LlamaCppModel = agent.model  # type: ignore[assignment]
     model.reset_timings()
@@ -882,9 +961,9 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
     try:
         if lock is not None:
             with lock:
-                iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
+                iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
         else:
-            iter_out = asyncio.run(_run_via_iter(agent, user_text, _session_history))
+            iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
     except Exception as exc:
         return {
             "text": "",
@@ -914,6 +993,7 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
 
     write_log({
         "user": user_text,
+        "session_key": key,
         "answer": text,
         "tool_calls": len(tool_activity),
         "tool_activity": tool_activity,
@@ -922,14 +1002,14 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
         "latency": {"total": elapsed, "voice": True},
     })
 
-    if _pipeline["with_memory"]:
+    if _pipeline["with_memory"] and history is not None:
         if skipped:
-            _session_history.extend(iter_out["skipped_msgs"])
-            overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+            history.extend(iter_out["skipped_msgs"])
+            overflow = len(history) - _MAX_HISTORY_MESSAGES
             if overflow > 0:
-                del _session_history[:overflow]
+                del history[:overflow]
         else:
-            _extend_session_history_from_result(result)
+            _extend_history_from_result(history, result)
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
@@ -943,10 +1023,10 @@ def run_for_voice(client: Any, user_text: str) -> dict[str, Any]:
     }
 
 
-def _extend_session_history_from_result(result: Any) -> None:
-    """After agent.run_sync, append new messages to _session_history so the
-    next call carries the conversation forward. Capped at _MAX_HISTORY_MESSAGES."""
-    global _session_history
+def _extend_history_from_result(history: list[Any], result: Any) -> None:
+    """After agent.run_sync, append new messages onto `history` so the next
+    call (with the same session_key) carries the conversation forward.
+    Capped at _MAX_HISTORY_MESSAGES."""
     try:
         new_msgs = result.new_messages()
     except Exception:
@@ -954,10 +1034,10 @@ def _extend_session_history_from_result(result: Any) -> None:
             new_msgs = result.all_messages()
         except Exception:
             return
-    _session_history.extend(new_msgs)
-    overflow = len(_session_history) - _MAX_HISTORY_MESSAGES
+    history.extend(new_msgs)
+    overflow = len(history) - _MAX_HISTORY_MESSAGES
     if overflow > 0:
-        del _session_history[:overflow]
+        del history[:overflow]
 
 
 # ============================================================================
@@ -1151,23 +1231,31 @@ def init_extensions(args, client) -> None:
     _pipeline["with_thinking"] = with_thinking
     _pipeline["client"] = client
 
-    # --- Memory: identity injection + episodic history ---------------------------
+    # --- User-facing display config (memory/config.json) -----------------------
+    try:
+        from memory import config as user_config
+
+        cfg = user_config.load()
+        display = cfg.get("display") or {}
+        _pipeline["show_latency"] = bool(display.get("show_latency", False))
+        _pipeline["show_tool_activity"] = bool(display.get("show_tool_activity", True))
+        _pipeline["show_help_on_start"] = bool(display.get("show_help_on_start", True))
+    except Exception as exc:
+        print(f"[python_pydantic_ai] config load skipped: {exc}", file=sys.stderr, flush=True)
+
+    # --- Memory: identity injection (per-session history is lazy-loaded) -----
     if with_memory:
         try:
-            from memory.memory_module import load_identity, load_recent_turns
+            from memory.memory_module import load_identity
 
             identity = load_identity()
             if identity:
                 _pipeline["system_prompt"] = f"{identity}\n\n{prompts.SYSTEM_PROMPT}"
-            recent_dicts = load_recent_turns(n=5)
-            if recent_dicts:
-                _session_history.extend(_episodic_to_messages(recent_dicts))
-                print(
-                    f"[python_pydantic_ai] memory on — identity injected, loaded {len(recent_dicts)//2} recent turn(s).",
-                    flush=True,
-                )
-            else:
-                print("[python_pydantic_ai] memory on — identity injected; no prior episodic turns.", flush=True)
+            print(
+                "[python_pydantic_ai] memory on — identity injected; per-channel "
+                "history loads lazily on first turn.",
+                flush=True,
+            )
         except Exception as exc:
             print(f"[python_pydantic_ai] --with-memory partial: {exc}", file=sys.stderr, flush=True)
 
@@ -1233,20 +1321,135 @@ def ensure_workspace() -> None:
 # ============================================================================
 # CLI loops
 # ============================================================================
+HELP_BANNER = """\
+Commands (type at the You: prompt):
+  /help              show this help
+  /latency [on|off]  toggle the per-turn latency breakdown
+  /tools [on|off]    toggle the tool-activity lines under each reply
+  /setup             re-run the first-time setup wizard
+  /multi             enter multi-line mode (finish with a blank line)
+  /quit              exit (also: exit, quit, Ctrl-D)
+
+Tips:
+  • Pasting multiple lines is auto-detected — paste freely, the whole
+    block is sent as one turn.
+  • The agent can call 28 tools (files, web, weather, memory, time, math,
+    speak, image gen, vision, run_python, schedule, delegate, send_message
+    on a messaging bridge). Just ask in plain English.
+"""
+
+
+def _print_help_banner() -> None:
+    print(HELP_BANNER, end="", flush=True)
+
+
+def _read_user_input(prompt_text: str = "You: ") -> str | None:
+    """Read one user turn.
+
+    Pasting multi-line text into a terminal that runs plain `input()` delivers
+    one line per Enter, which breaks the prompt. We detect a paste by checking
+    whether stdin has more data ready immediately after the first line — if so,
+    we keep draining until stdin is quiet (~30 ms idle) and return the joined
+    block as a single turn. A blank `/multi` mode is also offered for typed
+    multi-line input where there's no actual paste burst to detect.
+    """
+    try:
+        first = input(prompt_text)
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+    if first.strip() == "/multi":
+        print("(multi-line mode — finish with a blank line)")
+        lines: list[str] = []
+        while True:
+            try:
+                line = input("... ")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if line == "":
+                break
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    # Paste-burst detection. Works only on Unix-y TTYs; on platforms where
+    # select on stdin doesn't behave, we just return the first line.
+    try:
+        import select
+        extra: list[str] = []
+        while sys.stdin in select.select([sys.stdin], [], [], 0.03)[0]:
+            line = sys.stdin.readline()
+            if line == "":  # EOF
+                break
+            extra.append(line.rstrip("\n"))
+        if extra:
+            return "\n".join([first, *extra]).strip()
+    except Exception:
+        pass
+    return first.strip()
+
+
+def _handle_slash_command(cmd: str) -> bool:
+    """Returns True if the loop should continue; False to exit."""
+    parts = cmd.split()
+    head = parts[0].lower()
+    arg = parts[1].lower() if len(parts) > 1 else ""
+
+    if head in {"/quit", "/exit"}:
+        return False
+    if head == "/help":
+        _print_help_banner()
+        return True
+    if head == "/latency":
+        if arg in {"on", "off"}:
+            _pipeline["show_latency"] = (arg == "on")
+        else:
+            _pipeline["show_latency"] = not _pipeline.get("show_latency", False)
+        print(f"  latency report → {'on' if _pipeline['show_latency'] else 'off'}")
+        return True
+    if head == "/tools":
+        if arg in {"on", "off"}:
+            _pipeline["show_tool_activity"] = (arg == "on")
+        else:
+            _pipeline["show_tool_activity"] = not _pipeline.get("show_tool_activity", True)
+        print(f"  tool activity → {'on' if _pipeline['show_tool_activity'] else 'off'}")
+        return True
+    if head == "/setup":
+        try:
+            from memory import config as user_config
+
+            user_config.run_wizard(force=True)
+            cfg = user_config.load()
+            display = cfg.get("display") or {}
+            _pipeline["show_latency"] = bool(display.get("show_latency", False))
+            _pipeline["show_tool_activity"] = bool(display.get("show_tool_activity", True))
+            print("  setup complete — restart the chat for identity changes to take effect.")
+        except Exception as exc:
+            print(f"  /setup failed: {exc}")
+        return True
+    print(f"  unknown command: {head} (try /help)")
+    return True
+
+
 def cli_loop(client, mode: str) -> int:
     ensure_workspace()
     print(f"[python_pydantic_ai] Workspace: {tools.WORKSPACE}")
-    print("Type 'exit' or 'quit' to stop.")
+    if _pipeline.get("show_help_on_start", True):
+        _print_help_banner()
+    else:
+        print("Type /help for commands. /quit to stop.")
     while True:
-        try:
-            user_text = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
+        user_text = _read_user_input("You: ")
+        if user_text is None:
             print()
             return 0
         if not user_text:
             continue
         if user_text.lower() in {"exit", "quit"}:
             return 0
+        if user_text.startswith("/"):
+            if not _handle_slash_command(user_text):
+                return 0
+            continue
         run_command(client, user_text, mode)
 
 
@@ -1327,6 +1530,15 @@ def main() -> int:
     if is_interactive and not args.with_memory:
         args.with_memory = True
         print("[python_pydantic_ai] interactive chat — memory auto-enabled (identity + session history).", flush=True)
+
+    # First-time setup: if memory/config.json doesn't exist yet, run the
+    # wizard for interactive sessions, fall back to defaults otherwise.
+    try:
+        from memory import config as user_config
+
+        user_config.ensure_configured(prompt_if_missing=is_interactive)
+    except Exception as exc:
+        print(f"[python_pydantic_ai] setup check skipped: {exc}", flush=True)
 
     client = _LlamaClientShim(
         model_path=args.model_path,

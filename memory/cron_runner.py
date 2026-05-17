@@ -72,10 +72,19 @@ class CronRunner(threading.Thread):
                 try:
                     if self._lock is not None:
                         with self._lock:
-                            self._callback(prompt)
+                            self._invoke(prompt, name)
                     else:
-                        self._callback(prompt)
+                        self._invoke(prompt, name)
                 except Exception as exc:
                     print(f"[cron-runner] {name!r} callback failed: {exc}", flush=True)
             # Wait for the next tick, but wake immediately on shutdown.
             self._stop.wait(self._poll_s)
+
+    def _invoke(self, prompt: str, schedule_name: str) -> None:
+        """Call the handler with a cron-specific session key when supported,
+        so scheduled prompts don't bleed into any user chat's rolling history."""
+        key = f"cron:{schedule_name}"
+        try:
+            self._callback(prompt, session_key=key)
+        except TypeError:
+            self._callback(prompt)

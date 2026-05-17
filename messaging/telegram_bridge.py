@@ -12,7 +12,11 @@ Required env vars:
     TELEGRAM_ALLOWED_CHAT_IDS   — optional, comma-separated chat IDs
 
 Uses long-polling so no public URL / webhook is needed — works behind a
-home router with no port forwarding.
+home router with no port forwarding. The poll loop holds an HTTP request
+open against Telegram's servers; the moment a message arrives the server
+returns it, so there's no "scheduler" interval — replies start as soon as
+the LLM finishes generating. The bridge also logs each receive/reply so
+you can verify the round-trip in the gateway console.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import time
 from typing import Any, Callable
 
 
@@ -124,20 +129,55 @@ class TelegramBridge:
                     return
                 chat_id = update.effective_chat.id if update.effective_chat else 0
                 if self._allowed and chat_id not in self._allowed:
+                    print(f"[telegram] dropped message from non-allowlisted chat_id={chat_id}", flush=True)
                     return
-                # Run the (blocking) LLM call in a thread so we don't block
-                # the telegram poll loop.
-                reply = await asyncio.to_thread(self._safe_handle, msg.text.strip())
+                preview = msg.text.strip()
+                short = preview if len(preview) <= 60 else preview[:57] + "..."
+                print(f"[telegram] ← chat={chat_id} {short!r}", flush=True)
+                # Show a "typing…" indicator while the LLM works so the
+                # human can see we're alive even on a slow turn.
+                async def _keep_typing():
+                    try:
+                        while True:
+                            try:
+                                await msg.chat.send_chat_action(action="typing")
+                            except Exception:
+                                pass
+                            await asyncio.sleep(4.0)
+                    except asyncio.CancelledError:
+                        return
+
+                typing_task = asyncio.create_task(_keep_typing())
+                started = time.perf_counter()
+                try:
+                    reply = await asyncio.to_thread(
+                        self._safe_handle, preview, f"telegram:{chat_id}"
+                    )
+                finally:
+                    typing_task.cancel()
+                elapsed = time.perf_counter() - started
                 if reply:
                     for i in range(0, len(reply), 4000):
                         await msg.reply_text(reply[i : i + 4000])
+                    print(f"[telegram] → chat={chat_id} ({len(reply)} chars in {elapsed:.1f}s)", flush=True)
+                else:
+                    print(f"[telegram] → chat={chat_id} (empty reply after {elapsed:.1f}s)", flush=True)
 
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
             await app.initialize()
             await app.start()
-            await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            print(f"[telegram] connected; allowlist: "
+            # poll_interval=0 + timeout=25 = long-poll: Telegram holds the
+            # request open until a message arrives, then returns instantly.
+            # No "tick rate" between messages — perceived delivery latency is
+            # network-bound (sub-second) and reply latency is bounded only by
+            # LLM inference time.
+            await app.updater.start_polling(
+                poll_interval=0.0,
+                timeout=25,
+                allowed_updates=Update.ALL_TYPES,
+            )
+            print(f"[telegram] connected (long-poll, instant delivery); allowlist: "
                   f"{sorted(self._allowed) if self._allowed else 'OPEN (set TELEGRAM_ALLOWED_CHAT_IDS to restrict)'}",
                   flush=True)
             self._ready.set()
@@ -165,11 +205,19 @@ class TelegramBridge:
             except Exception:
                 pass
 
-    def _safe_handle(self, text: str) -> str:
+    def _safe_handle(self, text: str, session_key: str | None = None) -> str:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    return self._handler(text) or ""
-            return self._handler(text) or ""
+                    return self._call_handler(text, session_key) or ""
+            return self._call_handler(text, session_key) or ""
         except Exception as exc:
             return f"(agent error: {type(exc).__name__}: {exc})"
+
+    def _call_handler(self, text: str, session_key: str | None) -> str:
+        """Handler signature is permissive: try the modern (text, session_key)
+        form first, fall back to (text) for callers that haven't upgraded."""
+        try:
+            return self._handler(text, session_key=session_key) or ""
+        except TypeError:
+            return self._handler(text) or ""

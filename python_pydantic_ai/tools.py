@@ -859,6 +859,49 @@ def ask_user(question: str) -> dict[str, Any]:
     return {"asked": True, "question": clean}
 
 
+CAPABILITY_SUMMARY = (
+    "Capability overview (call `help_me` for the full list with examples):\n"
+    "  • Time, math, system status — get_time, calculate, system_status\n"
+    "  • Files (sandboxed workspace) — create_file, append_file, read_file,\n"
+    "    list_directory, delete_file, open_file\n"
+    "  • Web — web_search, get_weather, launch_url\n"
+    "  • Memory — remember, recall, list_facts, forget, search_memory\n"
+    "  • Voice (Kokoro TTS) — speak, speak_file\n"
+    "  • Vision / image gen — look_at, generate_image\n"
+    "  • Code — run_python (sandboxed subprocess, 10 s timeout)\n"
+    "  • macOS — open_app, open_file, launch_url\n"
+    "  • Scheduling — schedule_prompt, list_schedules, cancel_schedule\n"
+    "  • Messaging — send_message (telegram / discord / imessage bridges)\n"
+    "  • Sub-agents — delegate(subtask) for parallel/independent work\n"
+    "  • Clarify — ask_user(question) when intent is ambiguous\n"
+)
+
+
+def help_me() -> dict[str, Any]:
+    """Return a structured capability list and CLI command summary.
+
+    The agent should call this when the user asks "what can you do?",
+    "help", "what tools do you have?", etc. — the result is a clean,
+    short summary that the agent should relay (verbatim) rather than
+    inventing its own list of capabilities.
+    """
+    return {
+        "summary": CAPABILITY_SUMMARY,
+        "cli_commands": [
+            "/help — show commands",
+            "/latency [on|off] — toggle latency report",
+            "/tools [on|off] — toggle tool-activity lines",
+            "/setup — re-run the setup wizard",
+            "/multi — multi-line input mode",
+            "/quit — exit",
+        ],
+        "tip": (
+            "Just describe what you want in plain English. The agent picks the "
+            "right tool; you don't need to know the function names."
+        ),
+    }
+
+
 def system_status() -> dict[str, Any]:
     total, used, free = shutil.disk_usage(WORKSPACE)
     load_avg = os.getloadavg() if hasattr(os, "getloadavg") else None

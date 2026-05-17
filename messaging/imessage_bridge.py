@@ -169,16 +169,23 @@ class IMessageBridge:
             print(f"[imessage] ignoring message from {handle!r} (not in allowlist)", flush=True)
             return
         print(f"[imessage] from {handle!r} ({_cocoa_to_iso(row['date_ns'])}): {text[:100]!r}", flush=True)
+        session_key = f"imessage:{handle}"
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    reply = self._handler(text) or ""
+                    reply = self._call_handler(text, session_key) or ""
             else:
-                reply = self._handler(text) or ""
+                reply = self._call_handler(text, session_key) or ""
         except Exception as exc:
             reply = f"(agent error: {type(exc).__name__}: {exc})"
         if reply:
             self._send(handle, reply)
+
+    def _call_handler(self, text: str, session_key: str) -> str:
+        try:
+            return self._handler(text, session_key=session_key) or ""
+        except TypeError:
+            return self._handler(text) or ""
 
     def _send(self, handle: str, message: str) -> None:
         # AppleScript via osascript; quote the strings the AppleScript way

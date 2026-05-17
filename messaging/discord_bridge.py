@@ -165,9 +165,15 @@ class DiscordBridge:
             if not content:
                 return
 
+            # One session per Discord channel — DMs and shared channels each
+            # keep their own rolling history so two users in two channels
+            # don't see each other's context.
+            channel_id = int(getattr(message.channel, "id", 0))
+            session_key = f"discord:{channel_id}" if channel_id else f"discord:user:{uid}"
+
             async with message.channel.typing():
                 # Run the (blocking) LLM call in a thread so we don't block the discord loop.
-                reply = await asyncio.to_thread(self._safe_handle, content)
+                reply = await asyncio.to_thread(self._safe_handle, content, session_key)
             if reply:
                 # Discord caps messages at 2000 chars
                 for i in range(0, len(reply), 1900):
@@ -178,11 +184,17 @@ class DiscordBridge:
         except Exception as exc:
             print(f"[discord] client.run failed: {exc}", flush=True)
 
-    def _safe_handle(self, text: str) -> str:
+    def _safe_handle(self, text: str, session_key: str | None = None) -> str:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    return self._handler(text) or ""
-            return self._handler(text) or ""
+                    return self._call_handler(text, session_key) or ""
+            return self._call_handler(text, session_key) or ""
         except Exception as exc:
             return f"(agent error: {type(exc).__name__}: {exc})"
+
+    def _call_handler(self, text: str, session_key: str | None) -> str:
+        try:
+            return self._handler(text, session_key=session_key) or ""
+        except TypeError:
+            return self._handler(text) or ""
