@@ -13,7 +13,7 @@ You run as an **instance** of a shared framework. There are two distinct zones, 
 ```
 python_jaeger/
   core/                   # Agent loop, loader, base tools
-  base_skills/            # Skills shipped with the framework
+  skills/                 # Core skills shipped with the framework (read-only)
   setup_wizard/           # First-run flow
   schemas/                # Pydantic config schemas
 ```
@@ -72,7 +72,7 @@ The loader picks up new skills automatically on next start (or hot-reload). You 
 
 ## Overriding Core Skills
 
-The framework ships base skills in `python_jaeger/base_skills/`. You can use them, but you cannot edit them.
+The framework ships core skills in `python_jaeger/skills/` (the in-package read-only zone). You can use them, but you cannot edit them — that directory is part of the installed framework, not your writable instance.
 
 If a base skill doesn't behave the way you need:
 

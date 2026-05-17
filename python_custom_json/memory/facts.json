@@ -1,5 +1,6 @@
 {
   "facts": {
+    "favorite color": "teal",
     "favorite_color": "teal",
     "preference_espresso": "user likes espresso",
     "preferred youtube video length": "90 seconds",

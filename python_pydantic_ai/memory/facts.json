@@ -6,7 +6,8 @@
     "preferred_youtube_video_length": "90 seconds",
     "prefers_speech": "true",
     "user_preference": "Always speak responses aloud",
-    "user_preference_ui_mode": "dark mode"
+    "user_preference_ui_mode": "dark mode",
+    "youtube_video_length_preference": "90 seconds"
   },
   "schema_version": 1
 }

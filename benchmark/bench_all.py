@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Four-way bench: python_custom_json vs python_hermes_xml vs python_pydantic_ai vs python_hermes_agent.
+"""Five-way bench: python_custom_json, python_hermes_xml, python_pydantic_ai,
+python_jaeger, python_hermes_agent.
 
-The first three are in-process (we load the Gemma model once per framework,
-serially, and call run_for_voice). The fourth runs over HTTP — we start a
+The first four are in-process (we load the Gemma model once per framework,
+serially, and call run_command). The fifth runs over HTTP — we start a
 local llama_cpp.server, drive hermes-agent via its `hermes chat -Q -q`
 CLI, and capture stdout + timing.
+
+Jaeger has a different startup path than the other three in-process
+frameworks (it needs an instance dir with identity.yaml + config.yaml +
+manifest.json staged before model load); we handle that in
+`run_jaeger_inprocess`, which uses an ephemeral instance under /tmp.
 
 We use a curated 5-prompt subset that:
   - exercises a few different tool categories (time, calc, free-text, web, fs)
@@ -14,7 +20,7 @@ We use a curated 5-prompt subset that:
 
 Run:
     python bench_all.py
-    python bench_all.py --skip-hermes-agent   # 3-way (no HTTP server needed)
+    python bench_all.py --skip-hermes-agent   # 4-way in-process only
     python bench_all.py --prompts file.txt    # custom prompt list
 
 Results land in bench_all_results.json + an at-a-glance markdown table
@@ -40,6 +46,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent           # the benchmark/ dir
 PROJECT_ROOT = ROOT.parent                       # repo root; venv + main.py live here
+# Make sibling framework packages importable regardless of cwd.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 VENV_PY = PROJECT_ROOT / ".venv" / "bin" / "python"
 HERMES_BIN = PROJECT_ROOT / ".venv" / "bin" / "hermes"
 LLM_PORT = int(os.environ.get("HERMES_LLM_PORT", "11435"))
@@ -51,10 +60,28 @@ LLM_MODEL = os.environ.get(
 
 
 DEFAULT_PROMPTS: list[str] = [
+    # Skip-final candidates (tool-result-is-the-answer) — these should hit
+    # python_pydantic_ai's intercept path for sub-second turns.
     "what time is it",
+    "what time is it in Tokyo",
     "calculate 47 times 23 plus 12",
+    "calculate the square root of 12345",
+    "what is the cpu and disk status of this machine",
+
+    # Free-text (no tool needed) — exercises the model's direct response path.
     "tell me a one sentence story about a robot",
+    "in three words, what is the capital of France",
+
+    # Web tools — exercises external IO + a longer tool call.
     "search the web for recent news about local llms",
+    "what is the current weather in Seattle",
+
+    # Memory ops — only meaningful for the in-process frameworks.
+    "remember that my favorite color is teal",
+    "what is my favorite color",
+
+    # File / workspace inspection — different tool surfaces across frameworks
+    # but all should produce SOMETHING (each has its own equivalent).
     "list files in the workspace directory",
 ]
 
@@ -150,6 +177,102 @@ def run_inprocess(name: str, prompts: list[str]) -> list[dict[str, Any]]:
 
 
 # ============================================================================
+# Jaeger in-process runner — same idea as run_inprocess but with the extra
+# instance-dir setup the v2 framework requires (identity.yaml + config.yaml
+# + manifest.json must exist before model load, no project-root memory dir
+# to fall back on).
+# ============================================================================
+def run_jaeger_inprocess(prompts: list[str]) -> list[dict[str, Any]]:
+    import tempfile, shutil
+    from python_jaeger.core.instance import InstanceLayout
+    from python_jaeger.main import LlamaCppPythonClient, _get_agent, _pipeline, prewarm, run_command
+    from python_jaeger.core.prompts import build_system_prompt
+    from python_jaeger.core.schemas import (
+        Config, DisplayConfig, Identity, Manifest, ModelConfig, SkillsConfig,
+        dump_json, dump_yaml, load_yaml,
+    )
+    from python_jaeger.core import tools as jaeger_tools
+
+    tmp = Path(tempfile.mkdtemp(prefix="jaeger_bench_"))
+    root = tmp / "instance"
+    os.environ["JAEGER_INSTANCE_DIR"] = str(root)
+
+    layout = InstanceLayout(root=root)
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    dump_yaml(layout.identity_path, Identity(
+        name="BenchBot",
+        role="benchmark target",
+        personality=(
+            "Concise and direct. When the user asks you to save preferences, "
+            "call remember proactively. When asked about prior preferences, "
+            "call recall or list_facts first."
+        ),
+    ))
+    dump_yaml(layout.config_path, Config(
+        instance_name="bench",
+        model=ModelConfig(model_path=Path(LLM_MODEL), ctx=4096),
+        display=DisplayConfig(show_latency=False, show_tool_activity=True, show_help_on_start=False),
+        skills=SkillsConfig(run_smoke_tests=False),
+    ))
+    dump_json(layout.manifest_path, Manifest(instance_name="bench"))
+
+    print(f"\n=== python_jaeger: loading Gemma in-process (instance: {root}) ===", flush=True)
+    started = time.perf_counter()
+    jaeger_tools.bind(layout)
+    _pipeline["layout"] = layout
+    _pipeline["config"] = load_yaml(layout.config_path, Config)
+    _pipeline["system_prompt"] = build_system_prompt(layout)
+    _pipeline["show_latency"] = False
+    _pipeline["show_tool_activity"] = True
+    _pipeline["show_help_on_start"] = False
+    client = LlamaCppPythonClient(_pipeline["config"].model, warmup=True)
+    _get_agent(client)
+    # Pre-pay the system-prompt + tool-schema prefill so the first
+    # user-facing turn isn't cold (parity with python_pydantic_ai).
+    prewarm(client)
+    print(f"[python_jaeger] loaded in {time.perf_counter() - started:.1f}s", flush=True)
+
+    results: list[dict[str, Any]] = []
+    try:
+        for prompt in prompts:
+            print(f"\n--- python_jaeger :: {prompt!r}", flush=True)
+            buf = StringIO()
+            err_buf = StringIO()
+            t0 = time.perf_counter()
+            err: str | None = None
+            try:
+                with redirect_stdout(buf), redirect_stderr(err_buf):
+                    run_command(client, prompt)
+            except Exception as exc:
+                err = f"{type(exc).__name__}: {exc}"
+            elapsed = time.perf_counter() - t0
+            captured = buf.getvalue()
+            text, tool_activity = _extract_answer_from_run_command_output(captured)
+            print(f"  text:    {text[:120]!r}")
+            for line in tool_activity:
+                print(f"  {line.strip()}")
+            print(f"  elapsed: {elapsed:.2f}s")
+            results.append({
+                "framework": "python_jaeger",
+                "prompt": prompt,
+                "text": text,
+                "tool_activity": tool_activity,
+                "elapsed_s": elapsed,
+                "error": err,
+            })
+    finally:
+        try:
+            del client
+        except UnboundLocalError:
+            pass
+        gc.collect()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return results
+
+
+# ============================================================================
 # HTTP server lifecycle for hermes-agent
 # ============================================================================
 def wait_for_port(host: str, port: int, timeout_s: float = 60.0) -> bool:
@@ -171,9 +294,16 @@ def start_llama_server(log_path: Path) -> subprocess.Popen:
         "--model", LLM_MODEL,
         "--host", "127.0.0.1",
         "--port", str(LLM_PORT),
-        "--n_ctx", "8192",
+        # hermes-agent's built-in system prompt + tool schema runs ~12-14K
+        # tokens before the user prompt is even appended. 8192 caused
+        # "Requested tokens (14144) exceed context window" on every turn;
+        # 32768 leaves plenty of headroom on Gemma 4 (trained on 262K).
+        "--n_ctx", "32768",
         "--n_gpu_layers", "-1",
-        "--chat_format", "gemma",
+        # Intentionally NO --chat_format: the hardcoded "gemma" template
+        # is for Gemma 1/2 and leaks <|channel>thought\n… markers on
+        # Gemma 4. Letting llama-cpp-python read the GGUF's embedded
+        # chat template gives clean output for the Gemma 4 series.
         "--model_alias", "gemma-4-26b-a4b",
     ]
     log_fh = log_path.open("w")
@@ -271,12 +401,13 @@ def short(s: str, n: int = 60) -> str:
 def render_markdown_table(prompts: list[str], rows_by_fw: dict[str, list[dict[str, Any]]]) -> str:
     frameworks = list(rows_by_fw.keys())
     out: list[str] = []
-    out.append("# Four-way agent benchmark")
+    out.append("# Five-way agent benchmark")
     out.append("")
     out.append(
-        "All four agents driven by the same local Gemma 4 26B-A4B Q4_K_M weights. "
-        "The first three load the model in-process; `python_hermes_agent` drives it "
-        "over HTTP via `llama_cpp.server`."
+        "All agents driven by the same local Gemma 4 26B-A4B Q4_K_M weights. "
+        "The in-process frameworks (`python_custom_json`, `python_hermes_xml`, "
+        "`python_pydantic_ai`, `python_jaeger`) load the model directly; "
+        "`python_hermes_agent` drives it over HTTP via `llama_cpp.server`."
     )
     out.append("")
     out.append("## Per-prompt total seconds")
@@ -340,9 +471,16 @@ def main() -> int:
                    help="Optional file with one prompt per line; default is the curated 5-prompt subset.")
     p.add_argument("--skip-hermes-agent", action="store_true",
                    help="Skip the HTTP-based hermes-agent run.")
-    p.add_argument("--frameworks", default="python_custom_json,python_hermes_xml,python_pydantic_ai",
+    # Order matters: each framework load/teardown leaves residue in the Metal
+    # KV cache that can corrupt subsequent llama_decode calls (we've reproduced
+    # `llama_decode returned -3` mid-session in the framework loaded LAST when
+    # 3+ frameworks ran before it). Putting `python_jaeger` first gives it a
+    # clean Metal context; pydantic_ai is the most robust at recovery, so it
+    # goes last among the in-process group.
+    p.add_argument("--frameworks",
+                   default="python_jaeger,python_custom_json,python_hermes_xml,python_pydantic_ai",
                    help="Comma-separated list of in-process frameworks to bench.")
-    p.add_argument("--out", type=Path, default=ROOT / "BENCHMARK_4WAY.md",
+    p.add_argument("--out", type=Path, default=ROOT / "BENCHMARK_5WAY.md",
                    help="Where to write the markdown table.")
     p.add_argument("--json-out", type=Path, default=ROOT / "bench_all_results.json",
                    help="Where to write the raw JSON results.")
@@ -361,14 +499,63 @@ def main() -> int:
 
     rows_by_fw: dict[str, list[dict[str, Any]]] = {}
 
+    worker = ROOT / "bench_worker.py"
     for fw in args.frameworks.split(","):
         fw = fw.strip()
         if not fw:
             continue
-        rows_by_fw[fw] = run_inprocess(fw, prompts)
-        # Aggressively reclaim Metal/KV state before the next framework loads.
-        gc.collect()
-        time.sleep(0.5)
+        # Subprocess isolation: each framework gets a fresh Python process
+        # and therefore a fresh Metal context. Single-process back-to-back
+        # loads on Apple Silicon leak KV state across frameworks and trip
+        # `llama_decode returned -3` mid-bench.
+        print(f"\n=== {fw} (subprocess) ===", flush=True)
+        prompts_blob = "\n".join(prompts)
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(worker), fw],
+                input=prompts_blob, capture_output=True, text=True,
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"[{fw}] TIMEOUT (15min)", flush=True)
+            rows_by_fw[fw] = [{"framework": fw, "prompt": p, "text": "",
+                               "tool_activity": [], "elapsed_s": 0.0,
+                               "error": "subprocess timeout"} for p in prompts]
+            continue
+        # Worker prints framework status to stderr (live), JSON to stdout.
+        # llama-cpp-python on Apple Metal often raises a non-zero exit from
+        # an atexit teardown assert AFTER the worker has finished cleanly,
+        # so we try to parse the JSON FIRST and only fall back to ERR if
+        # the JSON itself is missing or malformed.
+        if proc.stderr:
+            print(proc.stderr, flush=True)
+        try:
+            # Find the JSON payload — it's the last non-empty line of stdout
+            # (some shutdown noise can appear after it on some systems).
+            json_line = ""
+            for line in (proc.stdout or "").splitlines():
+                if line.strip().startswith("{"):
+                    json_line = line.strip()
+            payload = json.loads(json_line) if json_line else {}
+        except json.JSONDecodeError as exc:
+            print(f"[{fw}] worker stdout not JSON: {exc}", flush=True)
+            print(proc.stdout[-2000:], flush=True)
+            payload = {}
+
+        if payload.get("results"):
+            rows_by_fw[fw] = payload["results"]
+            if proc.returncode != 0:
+                print(f"[{fw}] worker exited {proc.returncode} after producing "
+                      "valid JSON (likely Metal atexit assert — harmless)",
+                      flush=True)
+        else:
+            print(f"[{fw}] worker failed (exit {proc.returncode}); stderr tail:",
+                  flush=True)
+            print(proc.stderr[-2000:], flush=True)
+            rows_by_fw[fw] = [{"framework": fw, "prompt": p, "text": "",
+                               "tool_activity": [], "elapsed_s": 0.0,
+                               "error": f"worker exit {proc.returncode}, no JSON"}
+                              for p in prompts]
 
     if not args.skip_hermes_agent:
         log_path = PROJECT_ROOT / "logs" / "bench_all_llm_server.log"

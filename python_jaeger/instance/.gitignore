@@ -1,0 +1,28 @@
+# Instance state — per-user, per-run. Never committed to the repo.
+# We keep the *structure* (default/{memory,logs,skills,credentials}/)
+# visible so the layout is obvious when you scan the source tree, but
+# we ignore everything inside — agent-authored skills, user secrets,
+# log output, memory snapshots, etc.
+
+# Identity / config / manifest the wizard writes — user-specific.
+*/identity.yaml
+*/config.yaml
+*/manifest.json
+*/.lock
+
+# All credential files and the embedded git history for each instance.
+*/credentials/*
+*/.git/
+
+# Memory / log / skill contents — but keep the directories themselves.
+*/memory/*
+*/logs/*
+*/skills/*
+!*/credentials/.gitkeep
+!*/memory/.gitkeep
+!*/logs/.gitkeep
+!*/skills/.gitkeep
+
+# What we DO commit: this file + README + the .gitkeep placeholders.
+!.gitignore
+!README.md

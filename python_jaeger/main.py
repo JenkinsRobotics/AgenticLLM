@@ -44,13 +44,13 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import RequestUsage
 
-from . import credentials as creds
-from . import log_rotation
-from . import memory as mem
-from . import prompts as prompt_module
-from . import tools as jaeger_tools
-from .cron_runner import CronRunner
-from .instance import (
+from .core import credentials as creds
+from .core import log_rotation
+from .core import memory as mem
+from .core import prompts as prompt_module
+from .core import tools as jaeger_tools
+from .core.cron_runner import CronRunner
+from .core.instance import (
     CoreVersionMismatch,
     InstanceLayout,
     InstanceLock,
@@ -59,11 +59,11 @@ from .instance import (
     resolve_instance_dir,
     touch_manifest_started,
 )
-from .llm_model import LlamaCppModel
-from .schemas import CORE_VERSION, Config
-from .schemas import load_yaml
-from .skill_loader import load_and_register
-from .setup_wizard import run_wizard
+from .core.llm_model import LlamaCppModel
+from .core.schemas import CORE_VERSION, Config
+from .core.schemas import load_yaml
+from .core.skill_loader import load_and_register
+from .core.setup_wizard import run_wizard
 
 
 # ---------------------------------------------------------------------------
@@ -72,12 +72,17 @@ from .setup_wizard import run_wizard
 SKIP_FINAL_TOOLS = frozenset({
     "get_time", "calculate", "system_status",
     "list_facts", "recall", "remember", "forget",
-    "file_write", "file_read", "list_skill_dir",
+    "file_write", "append_file", "delete_file", "file_read", "list_skill_dir",
     "ask_user",
     "schedule_prompt", "cancel_schedule",
     "help_me",
     "list_credentials",
     "reload_skills",
+    # Parity ports from pydantic_ai — same skip-final rationale: their
+    # dict result IS the user-facing answer.
+    "speak", "speak_file",
+    "launch_url", "open_file", "open_app",
+    "delegate",
 })
 
 
@@ -115,6 +120,18 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         commit = result.get("commit")
         suffix = f" [git {commit}]" if commit else ""
         return f"Wrote {result.get('path')} ({result.get('bytes')} bytes).{suffix}"
+    if name == "append_file":
+        if not result.get("appended"):
+            return f"Couldn't append: {result.get('error')}"
+        commit = result.get("commit")
+        suffix = f" [git {commit}]" if commit else ""
+        return f"Appended {result.get('bytes')} bytes to {result.get('path')}.{suffix}"
+    if name == "delete_file":
+        if not result.get("deleted"):
+            return f"Couldn't delete: {result.get('reason') or result.get('error')}"
+        commit = result.get("commit")
+        suffix = f" [git {commit}]" if commit else ""
+        return f"Deleted {result.get('path')}.{suffix}"
     if name == "file_read":
         return (result.get("content") or "")[:8000] if result.get("read") else f"Couldn't read: {result.get('error')}"
     if name == "list_skill_dir":
@@ -150,6 +167,23 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
                 f"{s['name']}_v{s['version']} ({s['reason'][:60]})" for s in skipped
             ))
         return " ".join(bits)
+    if name in ("speak", "speak_file"):
+        if result.get("spoken") is True:
+            return ""  # audio has played — no extra text needed
+        return f"Couldn't speak: {result.get('reason', 'unknown')}"
+    if name == "launch_url":
+        return (f"Opened {result.get('url', '')}." if result.get("opened")
+                else f"Couldn't open URL: {result.get('error', 'unknown')}")
+    if name == "open_file":
+        return (f"Opened {result.get('path', '')}." if result.get("opened")
+                else f"Couldn't open file: {result.get('error', 'unknown')}")
+    if name == "open_app":
+        return (f"Launched {result.get('app', '')}." if result.get("opened")
+                else f"Couldn't launch app: {result.get('error', 'unknown')}")
+    if name == "delegate":
+        if result.get("delegated"):
+            return str(result.get("answer") or "")
+        return f"Delegation failed: {result.get('error', 'unknown')}"
     return str(result)
 
 
@@ -167,6 +201,18 @@ _pipeline: dict[str, Any] = {
     "show_latency": False,
     "show_tool_activity": True,
     "show_help_on_start": True,
+    # Whether the KV cache has been primed with the system prompt + tool
+    # schema (set by `prewarm`). Once True, the first user-facing turn
+    # skips its cold-cache prefill penalty. Mirrors python_pydantic_ai.
+    "prewarmed": False,
+    # When False (default), every prompt runs with a fresh context — no
+    # prior turns are loaded from the episodic log, no in-process history
+    # is accumulated across turns. Mirrors python_pydantic_ai, which
+    # gates the same path behind --with-memory. Routing benchmarks need
+    # this OFF: by prompt 23, an accumulated history of 22 turns dilutes
+    # the MANDATORY rules at the top of the system prompt enough to
+    # cost ~3/23 on Gemma 4.
+    "with_memory": False,
 }
 
 _session_histories: dict[str, list[Any]] = {}
@@ -269,7 +315,7 @@ def _get_session_history(session_key: str) -> list[Any]:
 # ---------------------------------------------------------------------------
 # Agent construction
 # ---------------------------------------------------------------------------
-def _register_builtins(agent: Agent[None, str]) -> None:
+def _register_builtins(agent: Agent[None, str], client: Any) -> None:
     """Wire all the built-in Jaeger tools onto the agent.
 
     Skill-loader-managed skills come AFTER this — instance skills can
@@ -284,7 +330,9 @@ def _register_builtins(agent: Agent[None, str]) -> None:
 
     @agent.tool_plain
     def calculate(expression: str) -> dict:
-        """Evaluate a safe arithmetic expression."""
+        """Evaluate a safe arithmetic expression. Supports + - * / ** % //
+        and single-arg sqrt/abs/log/log10/exp/sin/cos/tan/floor/ceil/round.
+        For "square root of N" call calculate("sqrt(N)")."""
         return t.calculate(expression=expression)
 
     @agent.tool_plain
@@ -294,9 +342,19 @@ def _register_builtins(agent: Agent[None, str]) -> None:
 
     @agent.tool_plain
     def file_write(path: str, content: str) -> dict:
-        """Write a text file inside the instance's skills/ sandbox.
-        Refuses absolute paths, .. escapes, and writes outside skills/."""
+        """Write a text file in the sandboxed skills/ directory. Overwrites
+        if it already exists."""
         return t.file_write(path=path, content=content)
+
+    @agent.tool_plain
+    def append_file(path: str, content: str) -> dict:
+        """Append text to an existing skills/ file."""
+        return t.append_file(path=path, content=content)
+
+    @agent.tool_plain
+    def delete_file(path: str) -> dict:
+        """Delete a file from the skills/ directory."""
+        return t.delete_file(path=path)
 
     @agent.tool_plain
     def file_read(path: str) -> dict:
@@ -322,22 +380,23 @@ def _register_builtins(agent: Agent[None, str]) -> None:
     def recall(key: str) -> dict:
         """MANDATORY when the user asks about something they told you
         earlier ("what did I say my…", "do you remember…", "what's my
-        favorite X"). Call BEFORE answering — the persisted store is the
-        source of truth, short-term conversation context is not.
-        Fuzzy match is supported, so close-but-not-exact keys still hit."""
+        favorite X", "what video length do I prefer?"). Call BEFORE
+        answering — the persisted store is the source of truth.
+        Fuzzy match supported, so close-but-not-exact keys still hit."""
         return t.recall(key=key)
 
     @agent.tool_plain
     def forget(key: str) -> dict:
-        """Remove a stored fact. Call when the user says "forget that…"
-        or asks to remove a stored preference."""
+        """MANDATORY when the user asks to remove a stored fact
+        ("forget my X", "remove my X preference", "I changed my mind
+        about X"). Call this — don't just acknowledge in text."""
         return t.forget(key=key)
 
     @agent.tool_plain
     def list_facts() -> dict:
-        """List every fact currently in memory. Call when the user asks
-        an open-ended "what do you know about me?" or wants an audit of
-        what's been remembered."""
+        """MANDATORY for open-ended "what do you know about me?" or
+        "what have I told you?" questions. Returns the full k/v store.
+        Use this before falling back to free-text 'I don't know'."""
         return t.list_facts()
 
     @agent.tool_plain
@@ -396,9 +455,82 @@ def _register_builtins(agent: Agent[None, str]) -> None:
         the actual value, and never echo the value in your reply."""
         return {"credentials": creds.list_credentials(_pipeline["layout"])}
 
+    # ------------------------------------------------------------------
+    # Parity ports from python_pydantic_ai — TTS, vision, host, sub-agent,
+    # semantic memory. Each tool's docstring is what the LLM sees.
+    # ------------------------------------------------------------------
+    @agent.tool_plain
+    def speak(text: str) -> dict:
+        """Speak text aloud through the default audio output via Kokoro TTS.
+        Supports minimal SSML: <break time="200ms"/> and <breath/>."""
+        return t.speak(text=text)
+
+    @agent.tool_plain
+    def speak_file(path: str) -> dict:
+        """Read a file from <instance>/skills/ and narrate it through Kokoro TTS.
+        Path is sandbox-resolved — only files inside skills/ can be spoken."""
+        return t.speak_file(path=path)
+
+    @agent.tool_plain
+    def look_at(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
+        """Look at a workspace image and answer a question about it.
+        Default backbone: Moondream2 (~1.9B VLM, Apache-2.0). image_path is
+        sandbox-resolved under <instance>/skills/. First call lazy-loads
+        the VLM on CPU."""
+        return t.look_at(image_path=image_path, question=question)
+
+    @agent.tool_plain
+    def generate_image(
+        prompt: str,
+        out_path: str = "generated.png",
+        num_inference_steps: int = 1,
+        guidance_scale: float = 0.0,
+        seed: int | None = None,
+    ) -> dict:
+        """Generate an image from a text prompt and save under skills/.
+        Default backbone: SDXL-Turbo (1-step). First call downloads ~6 GB
+        of weights; subsequent calls are 1-3s per image."""
+        return t.generate_image(
+            prompt=prompt, out_path=out_path,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale, seed=seed,
+        )
+
+    @agent.tool_plain
+    def launch_url(url: str) -> dict:
+        """Open a URL in the user's default web browser (macOS only)."""
+        return t.launch_url(url=url)
+
+    @agent.tool_plain
+    def open_file(path: str) -> dict:
+        """Open a workspace file in its default macOS app.
+        Path is sandbox-resolved under <instance>/skills/."""
+        return t.open_file(path=path)
+
+    @agent.tool_plain
+    def open_app(app_name: str) -> dict:
+        """Launch a macOS application by name (e.g. 'Safari', 'Notes')."""
+        return t.open_app(app_name=app_name)
+
+    @agent.tool_plain
+    def search_memory(query: str, k: int = 5) -> dict:
+        """Semantic search over this instance's episodic conversation log.
+        Use when `recall` (exact key) misses — e.g. "what did we talk
+        about yesterday?", "did I tell you about my dog?". Returns top-k
+        past turns with cosine-similarity scores."""
+        return t.search_memory(query=query, k=k)
+
+    @agent.tool_plain
+    def delegate(subtask: str) -> dict:
+        """Hand off a focused subtask to a fresh sub-agent. Use to split
+        a complex request into independent pieces. The sub-agent runs in
+        its own context (no parent history) but shares the instance's
+        memory and tools. Depth-limited."""
+        return _delegate_internal(client, subtask)
+
     @agent.tool_plain
     def reload_skills() -> dict:
-        """Re-scan core base_skills/ + instance skills/ and register any
+        """Re-scan core skills/ + instance skills/ and register any
         newly-authored or newly-versioned skills onto this agent.
 
         Call this after you've finished writing all the files for a new
@@ -407,7 +539,7 @@ def _register_builtins(agent: Agent[None, str]) -> None:
         the skill is NOT registered and you must fix the skill (not the
         test) before retrying. Returns the names of skills newly
         registered this call."""
-        from .skill_loader import load_and_register, _REGISTERED_KEYS
+        from .core.skill_loader import load_and_register, _REGISTERED_KEYS
         cfg = _pipeline["config"]
         before = {(n, v, z) for (n, v, z) in _REGISTERED_KEYS}
         report = load_and_register(
@@ -431,10 +563,62 @@ def _register_builtins(agent: Agent[None, str]) -> None:
         }
 
 
+# ---------------------------------------------------------------------------
+# Sub-agent delegate — recursive invocation with depth guard
+# ---------------------------------------------------------------------------
+_DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
+_delegate_depth = threading.local()
+
+
+def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
+    """Run a subtask through the same agent loop with a fresh history.
+
+    Same pattern python_pydantic_ai uses: bumps a thread-local depth
+    counter, runs the subtask, returns the answer + elapsed time.
+    Depth-limited to prevent runaway recursion if a sub-agent decides
+    to delegate again.
+    """
+    depth = getattr(_delegate_depth, "value", 0)
+    if depth >= _DELEGATE_MAX_DEPTH:
+        return {
+            "delegated": False,
+            "error": f"delegate recursion limit hit ({_DELEGATE_MAX_DEPTH}); "
+                     "the sub-agent tried to delegate again — refusing.",
+        }
+    clean = (subtask or "").strip()
+    if not clean:
+        return {"delegated": False, "error": "empty subtask"}
+
+    _delegate_depth.value = depth + 1
+    started = time.perf_counter()
+    try:
+        agent = _get_agent(client)
+        iter_out = asyncio.run(_run_via_iter(agent, clean, None))
+    except Exception as exc:
+        _delegate_depth.value = depth
+        return {"delegated": False, "error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        _delegate_depth.value = depth
+
+    elapsed = time.perf_counter() - started
+    if iter_out.get("skipped"):
+        answer = iter_out.get("skipped_text") or ""
+    else:
+        result = iter_out.get("result")
+        answer = (getattr(result, "output", None) if result else "") or ""
+    return {
+        "delegated": True,
+        "subtask": clean,
+        "answer": str(answer).strip(),
+        "depth": depth + 1,
+        "elapsed_s": round(elapsed, 3),
+    }
+
+
 def build_agent(client: Any, system_prompt: str) -> Agent[None, str]:
     model = LlamaCppModel(client.llm)
     agent: Agent[None, str] = Agent(model=model, system_prompt=system_prompt, tool_retries=2)
-    _register_builtins(agent)
+    _register_builtins(agent, client)
     return agent
 
 
@@ -544,9 +728,34 @@ def _get_agent(client: Any) -> Agent[None, str]:
     return _agent_cache[key]
 
 
+def prewarm(client: Any) -> None:
+    """Prime the KV cache so the first user-facing turn isn't cold.
+
+    The first agent call against a freshly-loaded model pays a ~1 s
+    prefill cost to tokenize the (long) v2 system prompt + the tool
+    schema. By running a single trivial turn at startup, we shift that
+    cost from "what time is it" to the load phase — where the user
+    already accepts a wait. Idempotent. Mirrors python_pydantic_ai.prewarm.
+    """
+    if _pipeline.get("prewarmed"):
+        return
+    started = time.perf_counter()
+    try:
+        agent = _get_agent(client)
+        # A trivial free-text prompt: pays decode for system prompt +
+        # tool schema prefill + a handful of generation tokens. Result
+        # discarded — no history, no log.
+        agent.run_sync("Respond with just the word ready.")
+    except Exception as exc:
+        print(f"[jaeger] prewarm skipped: {exc}", flush=True)
+        return
+    _pipeline["prewarmed"] = True
+    print(f"[jaeger] agent prewarmed in {time.perf_counter() - started:.1f}s", flush=True)
+
+
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> None:
     key = session_key or _DEFAULT_SESSION_KEY
-    history = _get_session_history(key)
+    history = _get_session_history(key) if _pipeline["with_memory"] else None
     agent = _get_agent(client)
     model: LlamaCppModel = agent.model  # type: ignore[assignment]
     model.reset_timings()
@@ -621,17 +830,15 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         "latency": asdict(report),
     })
 
-    if skipped:
-        history.extend(iter_out["skipped_msgs"])
-        overflow = len(history) - _MAX_HISTORY_MESSAGES
-        if overflow > 0:
-            del history[:overflow]
-    else:
-        try:
-            new_msgs = result.new_messages() if hasattr(result, "new_messages") else result.all_messages()
-        except Exception:
-            new_msgs = []
-        history.extend(new_msgs)
+    if _pipeline["with_memory"] and history is not None:
+        if skipped:
+            history.extend(iter_out["skipped_msgs"])
+        else:
+            try:
+                new_msgs = result.new_messages() if hasattr(result, "new_messages") else result.all_messages()
+            except Exception:
+                new_msgs = []
+            history.extend(new_msgs)
         overflow = len(history) - _MAX_HISTORY_MESSAGES
         if overflow > 0:
             del history[:overflow]
@@ -742,7 +949,7 @@ def _handle_slash(cmd: str, client: Any | None) -> bool:
         print(f"  tool activity → {'on' if _pipeline['show_tool_activity'] else 'off'}")
         return True
     if head == "/skills":
-        from .skill_loader import discover_skills
+        from .core.skill_loader import discover_skills
         for s in discover_skills(_pipeline["layout"]):
             print(f"  {s.zone:8s}  {s.name}_v{s.version}  ({s.module_path})")
         return True
@@ -829,10 +1036,10 @@ def self_test(layout: InstanceLayout) -> int:
 
     # Skill discovery
     try:
-        from .skill_loader import discover_skills
+        from .core.skill_loader import discover_skills
         discovered = discover_skills(layout)
         names = [f"{s.name}_v{s.version}({s.zone})" for s in discovered]
-        print(f"== skill discovery == {names or '(none yet — base_skills empty)'}")
+        print(f"== skill discovery == {names or '(none yet — core skills/ empty)'}")
     except Exception as exc:
         print(f"== skill discovery == FAILED: {exc}")
         fail += 1
@@ -872,7 +1079,7 @@ def self_test(layout: InstanceLayout) -> int:
 
     # Migrations discovery
     try:
-        from .migrations import discover_migrations
+        from .core.migrations import discover_migrations
         migs = discover_migrations()
         print(f"== migrations == {[m['name'] for m in migs] or '(none registered — at head)'}")
     except Exception as exc:
@@ -939,7 +1146,7 @@ def _cli_delete_credential(layout: InstanceLayout, name: str) -> int:
 
 
 def _cli_migrate(layout: InstanceLayout) -> int:
-    from .migrations import run_pending_migrations
+    from .core.migrations import run_pending_migrations
 
     try:
         applied = run_pending_migrations(layout)
@@ -986,6 +1193,14 @@ def main() -> int:
     root = resolve_instance_dir(instance_name)
     layout = InstanceLayout(root=root)
 
+    # Self-test runs without identity/config/manifest — it only exercises
+    # the framework code paths (sandbox, memory, skill loader, credentials,
+    # migration discovery). Skip the wizard and just create the subdirs.
+    if args.self_test:
+        layout.root.mkdir(parents=True, exist_ok=True)
+        layout.ensure_dirs()
+        return self_test(layout)
+
     if args.setup or not layout.exists():
         layout = run_wizard(force=args.setup, instance_name=instance_name)
 
@@ -995,7 +1210,7 @@ def main() -> int:
         manifest = check_manifest(layout)
     except CoreVersionMismatch:
         try:
-            from .migrations import run_pending_migrations
+            from .core.migrations import run_pending_migrations
             applied = run_pending_migrations(layout)
             if applied:
                 print(f"[jaeger] applied {len(applied)} migration(s) to reach core {CORE_VERSION}: "
@@ -1028,8 +1243,8 @@ def main() -> int:
         if args.migrate:
             return _cli_migrate(layout)
 
-        if args.self_test:
-            return self_test(layout)
+        # NB: --self-test runs earlier in main() (before wizard / manifest / lock)
+        # so it works against a brand-new install with no identity yet.
 
         config: Config = load_yaml(layout.config_path, Config)
         _pipeline["layout"] = layout
@@ -1052,6 +1267,10 @@ def main() -> int:
         client = LlamaCppPythonClient(config.model, warmup=not args.no_warmup)
         # Force agent build now so skills load before the first prompt.
         _get_agent(client)
+        # Prewarm KV cache (system prompt + tool schema) so the first
+        # user-facing turn isn't cold. Same trick python_pydantic_ai uses.
+        if not args.no_warmup:
+            prewarm(client)
 
         # Cron runner: same llm_lock the chat loop uses, so a scheduled
         # prompt firing mid-conversation serializes cleanly.

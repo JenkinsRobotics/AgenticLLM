@@ -43,8 +43,9 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import RequestUsage
 
-from . import prompts, tools
-from .llm_model import LlamaCppModel
+from .core import prompts
+from .core import tools  # built-in tool implementations live in core/tools/
+from .core.llm_model import LlamaCppModel
 
 
 # Tools whose dict result already *is* the user-facing answer. When the agent
@@ -338,7 +339,7 @@ def _build_mcp_tools(specs: list[Any]) -> list[Tool]:
 
         def _make_caller(qualified_name: str):
             def _call(**kwargs: Any) -> dict[str, Any]:
-                from . import mcp_bridge
+                from .plugins import mcp_bridge
 
                 return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
 
@@ -557,7 +558,11 @@ def build_agent(
 
     @agent.tool_plain
     def speak_file(path: str) -> dict:
-        """Read a workspace file and narrate its contents aloud."""
+        """MANDATORY when the user asks to "read", "narrate", or "speak"
+        a named workspace FILE aloud ("read bench.txt out loud", "narrate
+        youtube_intro.txt", "speak the script as if for a video"). Reads
+        the file's contents and pipes them to Kokoro TTS. Use this — not
+        `speak` — whenever a file path is involved."""
         return tools.speak_file(path=path)
 
     @agent.tool_plain
@@ -572,26 +577,39 @@ def build_agent(
 
     @agent.tool_plain
     def remember(key: str, value: str) -> dict:
-        """Store a fact in unified memory shared across all agent processes."""
+        """MANDATORY when the user states a preference, identity fact,
+        plan, or anything they might recall later ("remember that…",
+        "my favorite X is…", "I'll be in town on…"). Call this
+        proactively — do NOT just acknowledge in text. Pick a
+        descriptive snake_case key."""
         return tools.remember(key=key, value=value)
 
     @agent.tool_plain
     def recall(key: str) -> dict:
-        """Fetch a previously saved fact by key (or by partial / word-overlap match)."""
+        """MANDATORY when the user asks about something they told you
+        earlier ("what did I say my…", "do you remember…", "what's my
+        favorite X", "what video length do I prefer?"). Call BEFORE
+        answering — the persisted store is the source of truth.
+        Fuzzy/word-overlap matching is supported, so close-but-not-exact
+        keys still hit. Try `recall` first; only fall back to
+        `search_memory` if both `recall` and `list_facts` miss."""
         return tools.recall(key=key)
 
     @agent.tool_plain
     def forget(key: str, confirm: bool = False) -> dict:
-        """Remove a stored fact by key.
+        """MANDATORY when the user asks to remove a stored fact
+        ("forget my X", "remove my X preference", "I changed my mind
+        about X"). Call this — don't just acknowledge in text.
 
         Same approval semantics as delete_file when
-        DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1.
-        """
+        DESTRUCTIVE_OPS_REQUIRE_CONFIRM=1."""
         return tools.forget(key=key, confirm=confirm)
 
     @agent.tool_plain
     def list_facts() -> dict:
-        """List every fact currently in unified memory."""
+        """MANDATORY for open-ended "what do you know about me?" or
+        "what have I told you?" questions. Returns the full k/v store.
+        Use this before falling back to free-text 'I don't know'."""
         return tools.list_facts()
 
     @agent.tool_plain
@@ -1262,7 +1280,7 @@ def init_extensions(args, client) -> None:
     # --- MCP: load bridge + record specs (agent will be rebuilt by _get_agent) ---
     if with_mcp:
         try:
-            from . import mcp_bridge
+            from .plugins import mcp_bridge
 
             registry = mcp_bridge.init_from_config()
             specs = registry.list_tools()
@@ -1278,7 +1296,7 @@ def init_extensions(args, client) -> None:
     # --- Thinking: background runner with shared LLM lock -----------------------
     if with_thinking:
         try:
-            from . import thinking_runner
+            from .plugins import thinking_runner
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock

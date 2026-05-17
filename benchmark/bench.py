@@ -21,6 +21,7 @@ import argparse
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 from contextlib import redirect_stdout
@@ -31,6 +32,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent           # the benchmark/ dir
 PROJECT_ROOT = ROOT.parent                       # repo root; framework dirs live here
+# Make sibling framework packages importable regardless of cwd.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 HISTORY_PATH = ROOT / "bench_history.jsonl"
 
 # Sentinel value for the (prompt, expected_tool) tuples: skip validation.
@@ -47,11 +51,14 @@ DEFAULT_PROMPTS: list[tuple[str, str | None]] = [
     ("what time is it", "get_time"),
     ("what time is it in shanghai", "get_time"),
     ("calculate 47 times 23 plus 12", "calculate"),
+    ("calculate the square root of 12345", "calculate"),
     ("list the workspace", "list_directory"),
     ("make a file called bench.txt with the message hello from the benchmark", "create_file"),
     ("read bench.txt out loud", "speak_file"),
     ("search the web for recent news about local llms", "web_search"),
+    ("what is the current weather in Seattle", "get_weather"),
     ("tell me a one sentence story about a robot", None),
+    ("in three words, what is the capital of France", None),
     ("delete bench.txt", "delete_file"),
     ("what is the cpu and disk status of this machine", "system_status"),
 
@@ -86,7 +93,16 @@ def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict
     framework's most recent log entry is checked: did the chosen tool match
     expected_tool? Was there a parse fallback? Mismatches are accumulated
     and printed in the run summary.
+
+    python_jaeger is a special case: its tool surface differs by design
+    (`file_write` not `create_file`, sandboxed to `skills/`, etc.) so
+    strict expected_tool checks would always fail. We dispatch jaeger
+    through `bench_worker.py` (subprocess for Metal-safety) and apply
+    SOFT validation: "did SOME tool fire when expected_tool was non-None?".
     """
+    if name == "python_jaeger":
+        return _run_jaeger_subprocess(prompts)
+
     if name == "python_custom_json":
         from python_custom_json.llm_client import LlamaCppPythonClient
         from python_custom_json.main import init_from_env, run_command, shutdown_extensions
@@ -177,6 +193,146 @@ def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict
     return results
 
 
+# ============================================================================
+# python_jaeger via subprocess (Metal-safety + different tool surface)
+# ============================================================================
+def _run_jaeger_subprocess(prompts: list[tuple[str, str | None]]) -> list[dict[str, Any]]:
+    """Dispatch the jaeger framework through `bench_worker.py`.
+
+    Each prompt's result is validated SOFTLY (tool-called? y/n) rather
+    than matched by exact tool name, because jaeger's surface is
+    intentionally different (file_write vs create_file, sandboxed paths).
+    A free-text reply when a tool was expected = fail; a tool call by
+    any name = pass.
+    """
+    worker = ROOT / "bench_worker.py"
+    if not worker.exists():
+        raise RuntimeError(f"bench_worker.py missing at {worker}")
+
+    prompt_texts = [p for p, _ in prompts]
+    prompts_blob = "\n".join(prompt_texts)
+    print(f"\n=== python_jaeger (subprocess via bench_worker.py) ===", flush=True)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(worker), "python_jaeger"],
+            input=prompts_blob, capture_output=True, text=True,
+            timeout=1200,
+        )
+    except subprocess.TimeoutExpired:
+        print("[python_jaeger] subprocess TIMEOUT (20min)", flush=True)
+        return [_jaeger_fail_row(p, t, "subprocess timeout") for p, t in prompts]
+
+    if proc.stderr:
+        # Worker prints its progress to stderr — surface it live.
+        print(proc.stderr, flush=True)
+
+    payload: dict[str, Any] = {}
+    json_line = ""
+    for line in (proc.stdout or "").splitlines():
+        if line.strip().startswith("{"):
+            json_line = line.strip()  # last JSON-shaped line wins
+    if json_line:
+        try:
+            payload = json.loads(json_line)
+        except json.JSONDecodeError as exc:
+            print(f"[python_jaeger] worker stdout not JSON: {exc}", flush=True)
+
+    worker_results = payload.get("results", [])
+    if not worker_results:
+        # Worker died before producing usable output. Surface tail of stderr/stdout
+        # and return failure rows so the bench summary still completes.
+        print(f"[python_jaeger] worker exit {proc.returncode}; stdout/stderr tail:", flush=True)
+        print(proc.stdout[-1000:], flush=True)
+        print(proc.stderr[-1000:], flush=True)
+        return [_jaeger_fail_row(p, t, f"worker exit {proc.returncode}, no JSON") for p, t in prompts]
+    if proc.returncode != 0:
+        print(f"[python_jaeger] worker exited {proc.returncode} after producing valid JSON "
+              "(likely Metal atexit assert — harmless)", flush=True)
+
+    # Map worker results back to bench.py's result shape with SOFT validation.
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    by_prompt = {r["prompt"]: r for r in worker_results}
+    for prompt_text, expected_tool in prompts:
+        wr = by_prompt.get(prompt_text)
+        if wr is None:
+            print(f"  [check] {prompt_text!r} — missing from worker output", flush=True)
+            failures.append({"prompt": prompt_text, "verdict": "missing from worker output"})
+            results.append(_jaeger_fail_row(prompt_text, expected_tool, "missing from worker output"))
+            continue
+
+        # Identify whether the worker ran a tool. The worker captures
+        # tool_activity lines like "▸ get_time()" — non-empty = tool fired.
+        tool_activity: list[str] = wr.get("tool_activity") or []
+        # Try to scrape the FIRST tool name out of the activity line(s) for the log.
+        actual_tool: str | None = None
+        for line in tool_activity:
+            stripped = line.strip()
+            for prefix in ("▸ ", "🔊 ", "💾 ", "🗑 ", "🔍 ", "🌐 ", "📱 ", "📂 "):
+                if stripped.startswith(prefix):
+                    rest = stripped[len(prefix):]
+                    # Parse "tool_name(args)" — keep only up to '(' or whitespace.
+                    for sep in ("(", " "):
+                        if sep in rest:
+                            rest = rest.split(sep, 1)[0]
+                            break
+                    actual_tool = rest.strip() or None
+                    break
+            if actual_tool:
+                break
+
+        # SOFT validation: did some tool fire when expected, and did it
+        # NOT fire when free-text was expected?
+        if expected_tool == _SKIP_VALIDATION:
+            status, summary = "ok", "(validation skipped)"
+        elif expected_tool is None:
+            if not tool_activity:
+                status, summary = "ok", "free-text as expected"
+            else:
+                status, summary = "warn", f"expected free-text, got tool={actual_tool!r}"
+        else:
+            # Expected a tool call; ANY tool counts as a pass under soft validation.
+            if tool_activity:
+                status = "ok"
+                summary = f"soft-pass: any tool — got {actual_tool!r} (strict expected {expected_tool!r})"
+            else:
+                status = "fail"
+                summary = f"expected SOME tool (strict: {expected_tool!r}), got free-text"
+
+        print(f"  [check] {prompt_text[:55]!r:60s}  {summary}", flush=True)
+        if status != "ok":
+            failures.append({"prompt": prompt_text, "verdict": summary, "actual_tool": actual_tool})
+
+        results.append({
+            "prompt": prompt_text,
+            "elapsed_s": wr.get("elapsed_s", 0.0),
+            "output": wr.get("text", ""),
+            "expected_tool": expected_tool,
+            "actual_tool": actual_tool,
+            "parse_fallback": None,
+            "verdict_status": status,
+        })
+
+    passed = sum(1 for r in results if r["verdict_status"] == "ok")
+    print(f"\n[python_jaeger] correctness (SOFT): {passed}/{len(results)} prompts called a tool when expected.", flush=True)
+    for fail in failures:
+        print(f"  FAIL: {fail['prompt'][:60]!r}  ->  {fail['verdict']}", flush=True)
+    return results
+
+
+def _jaeger_fail_row(prompt: str, expected: str | None, why: str) -> dict[str, Any]:
+    return {
+        "prompt": prompt,
+        "elapsed_s": 0.0,
+        "output": "",
+        "expected_tool": expected,
+        "actual_tool": None,
+        "parse_fallback": None,
+        "verdict_status": "fail",
+        "error": why,
+    }
+
+
 def _tail_log(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -231,13 +387,23 @@ def _prompt_texts(prompts: list[tuple[str, str | None]] | list[str]) -> list[str
     return out
 
 
+def _framework_log_path(framework: str) -> Path:
+    """Per-framework latency log location. Jaeger writes logs into its
+    instance dir (default: python_jaeger/instance/default/logs/), not
+    a framework-root logs/. The other three use the conventional
+    <framework>/logs/latency.jsonl path."""
+    if framework == "python_jaeger":
+        return PROJECT_ROOT / "python_jaeger" / "instance" / "default" / "logs" / "latency.jsonl"
+    return PROJECT_ROOT / framework / "logs" / "latency.jsonl"
+
+
 def latest_log_entries(
     framework: str,
     run_id: str | None,
     prompts: list[tuple[str, str | None]] | list[str],
 ) -> dict[str, dict[str, Any]]:
     """Return the most recent log entry per prompt for this framework."""
-    log_path = PROJECT_ROOT / framework / "logs" / "latency.jsonl"
+    log_path = _framework_log_path(framework)
     by_prompt: dict[str, dict[str, Any]] = {}
     if not log_path.exists():
         return by_prompt
@@ -915,7 +1081,12 @@ def show_history(limit_runs: int) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=["python_custom_json", "python_hermes_xml", "python_pydantic_ai"], help="Run just one framework.")
+    parser.add_argument("--only",
+                        choices=["python_custom_json", "python_hermes_xml", "python_pydantic_ai", "python_jaeger"],
+                        help="Run just one framework.")
+    parser.add_argument("--with-jaeger", action="store_true",
+                        help="Include python_jaeger (subprocess + SOFT validation since its tool surface "
+                             "intentionally differs from the other three).")
     parser.add_argument("--prompts", type=Path, help="Text file with one prompt per line.")
     parser.add_argument("--skip-run", action="store_true", help="Don't run new prompts; only summarize existing logs.")
     parser.add_argument("--history", action="store_true", help="Show recent bench-run history per prompt.")
@@ -949,7 +1120,12 @@ def main() -> int:
     elif args.with_mcp:
         prompts = DEFAULT_PROMPTS + MCP_PROMPTS
 
-    chosen = [args.only] if args.only else ["python_custom_json", "python_hermes_xml", "python_pydantic_ai"]
+    if args.only:
+        chosen = [args.only]
+    else:
+        chosen = ["python_custom_json", "python_hermes_xml", "python_pydantic_ai"]
+        if args.with_jaeger:
+            chosen.append("python_jaeger")
 
     # Derive a mode tag for the history entries.
     if args.mode_tag:

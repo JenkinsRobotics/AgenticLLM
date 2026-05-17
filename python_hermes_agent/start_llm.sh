@@ -12,7 +12,9 @@ cd "$(dirname "$0")/.."
 
 PORT="${HERMES_LLM_PORT:-11435}"
 MODEL_PATH="${HERMES_LLM_MODEL:-/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf}"
-N_CTX="${HERMES_LLM_CTX:-8192}"
+# hermes-agent's built-in system prompt + tool schema runs ~12-14K tokens
+# before the user prompt is appended. 32K leaves room on Gemma 4 (262K train).
+N_CTX="${HERMES_LLM_CTX:-32768}"
 GPU_LAYERS="${HERMES_LLM_GPU_LAYERS:--1}"
 
 if [ ! -f "$MODEL_PATH" ]; then
@@ -28,5 +30,7 @@ exec .venv/bin/python -m llama_cpp.server \
   --port "$PORT" \
   --n_ctx "$N_CTX" \
   --n_gpu_layers "$GPU_LAYERS" \
-  --chat_format gemma \
   --model_alias gemma-4-26b-a4b
+  # Intentionally NO --chat_format: the hardcoded "gemma" template is
+  # for Gemma 1/2 and corrupts Gemma 4 output. llama-cpp-python reads
+  # the GGUF's embedded template, which is the right one for Gemma 4.

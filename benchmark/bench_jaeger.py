@@ -36,6 +36,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent           # the benchmark/ dir
 PROJECT_ROOT = ROOT.parent                       # repo root; framework dirs live here
+# Make sibling framework packages importable regardless of cwd.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 # (prompt, expects_tool_call?). True = the framework should route to A tool,
@@ -98,15 +101,15 @@ def run_jaeger(prompts: list[tuple[str, bool]], runs: int, instance_dir: Path) -
     # Stage a throwaway instance dir so the benchmark doesn't disturb a
     # real one. The wizard isn't used — we write the three files directly
     # because we already know the answers.
-    from python_jaeger.instance import InstanceLayout
+    from python_jaeger.core.instance import InstanceLayout
     from python_jaeger.main import (
         LlamaCppPythonClient,
         _get_agent,
         _pipeline,
         run_command,
     )
-    from python_jaeger.prompts import build_system_prompt
-    from python_jaeger.schemas import (
+    from python_jaeger.core.prompts import build_system_prompt
+    from python_jaeger.core.schemas import (
         CORE_VERSION,
         Config,
         DisplayConfig,
@@ -118,7 +121,7 @@ def run_jaeger(prompts: list[tuple[str, bool]], runs: int, instance_dir: Path) -
         dump_yaml,
         load_yaml,
     )
-    from python_jaeger import tools as jaeger_tools
+    from python_jaeger.core import tools as jaeger_tools
 
     layout = InstanceLayout(root=instance_dir)
     layout.root.mkdir(parents=True, exist_ok=True)
