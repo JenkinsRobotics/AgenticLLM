@@ -1,105 +1,158 @@
-# The four agents
+# The five agents
 
-Four different agent implementations all driving the same local Gemma 4 26B-A4B Q4_K_M weights. Three were hand-rolled in this repo so we could pin down where prompt format, decoder constraints, and loop shape change tool-routing latency. The fourth wraps the full NousResearch [hermes-agent](https://github.com/NousResearch/hermes-agent) framework so we can compare against a real production-grade agent OS with the *exact same model* held constant.
+Five different agent implementations all driving the same local Gemma 4 26B-A4B Q4_K_M weights. Four are hand-rolled in this repo (so we can pin down where prompt format, decoder constraints, and loop shape change tool-routing latency); the fifth wraps the full NousResearch [hermes-agent](https://github.com/NousResearch/hermes-agent) framework so we can compare against a real production-grade agent OS with the *exact same model* held constant.
+
+Each has its own deep-dive doc:
+- **[python_jaeger](PYTHON_JAEGER.md)** ⭐⭐ — production self-improving agent (skills, plugins, instance isolation)
+- **[python_pydantic_ai](PYTHON_PYDANTIC_AI.md)** ⭐ — lean Pydantic AI reference (routing speed leader)
+- **[python_hermes_xml](PYTHON_HERMES_XML.md)** — hand-rolled XML format
+- **[python_custom_json](PYTHON_CUSTOM_JSON.md)** — hand-rolled JSON + GBNF grammar
+- **[python_hermes_agent](PYTHON_HERMES_AGENT.md)** — Nous upstream wrapped over local HTTP
+
+---
 
 ## At a glance
 
-| Dimension | `python_custom_json` | `python_hermes_xml` | `python_pydantic_ai` ⭐ | `python_hermes_agent` |
-|---|---|---|---|---|
-| Tool-call wire format | Bare JSON | Hermes XML | pydantic-ai typed tools | OpenAI function-call (HTTP) |
-| Decode constraint | GBNF grammar | Unconstrained | OpenAI tool-calls + drift recovery | Whatever the LLM returns |
-| Tool surface | our **19** typed tools | our **19** typed tools | our **19** typed tools (+ MCP) | hermes' **40+** built-in toolsets |
-| Loop ownership | ours (`decide → tool → finalize`) | ours (multi-step `_run_collect`) | pydantic-ai's, with our `iter()` skip-final intercept | hermes-agent's |
-| Skip-final-LLM | manual `fast` mode | per-step `mode=fast` | `SKIP_FINAL_TOOLS` set | n/a — hermes always summarizes |
-| Memory layer | shared `memory/` (facts + episodic) | shared `memory/` | shared `memory/` | hermes' own (FTS5 sessions + Honcho) |
-| MCP support | yes (dynamic via `mcp_bridge.py`) | yes (dynamic via `mcp_bridge.py`) | yes (`Tool.from_schema`, dynamic) | yes (hermes' native MCP integration) |
-| Transport to LLM | in-process llama-cpp-python | in-process llama-cpp-python | in-process llama-cpp-python | HTTP → `llama_cpp.server` on port 11435 |
-| Bench warm latency | ~0.5–0.7 s | ~0.5–0.7 s | **~0.3–0.5 s** (skip-final) | ~0.6–1.0 s (HTTP overhead) |
-| Voice integration | — | `VOICE_FRAMEWORK=hermes_xml` | default in `voice_assistant.py` | not wired (its own gateway) |
+| Dimension | `python_jaeger` ⭐⭐ | `python_pydantic_ai` ⭐ | `python_hermes_xml` | `python_custom_json` | `python_hermes_agent` |
+|---|---|---|---|---|---|
+| Tool-call wire format | pydantic-ai typed | pydantic-ai typed | Hermes XML | bare JSON | OpenAI function-call (HTTP) |
+| Decode constraint | none + drift recovery | none + drift recovery | none | GBNF grammar | whatever the model returns |
+| Tool surface | 33 core + versioned skills + MCP | 30 typed + MCP | 19 typed + MCP | 19 typed + MCP | hermes' 40+ |
+| Loop ownership | ours (`agent.iter()` + skip-final) | ours (`agent.iter()` + skip-final) | ours (`decide → tool → finalize`) | ours (`decide → tool → finalize`) | hermes-agent's |
+| Skip-final-LLM | yes (24 tools) | yes (17 tools) | per-step `mode=fast` | manual `fast` mode | n/a |
+| Sandbox | per-instance `<instance>/skills/` | per-framework `workspace/` | per-framework `workspace/` | per-framework `workspace/` | hermes' working dir |
+| Memory backend | per-instance + episodic | per-framework + episodic | per-framework + episodic | per-framework + episodic | hermes' own (FTS5 + Honcho) |
+| Multi-instance isolation | yes (lockfile, manifest) | no | no | no | no |
+| Skill versioning + smoke tests | **yes** | no | no | no | no (hermes has its own skills) |
+| Credential isolation | **yes** (`get_credential`) | no | no | no | no |
+| Git auto-commit per write | **yes** | no | no | no | no |
+| MCP support | yes (plugin) | yes (plugin) | yes (plugin) | yes (plugin) | yes (hermes native) |
+| Background CoT | yes (`--think`) | yes (`--think`) | yes (`--think`) | yes (`--think`) | n/a |
+| Messaging gateway | yes (Discord/TG/iMsg) | yes (Discord/TG/iMsg) | no | no | hermes own (Discord/TG/Slack/WhatsApp/Signal/Email) |
+| Transport to LLM | in-process llama-cpp | in-process llama-cpp | in-process llama-cpp | in-process llama-cpp | HTTP → `llama_cpp.server:11435` |
+| Bench score (23 prompts) | **23/23** | **23/23** | **23/23** | **23/23** | not in bench |
+| Warm latency budget | ~0.3–0.5 s | ~0.3–0.5 s | ~0.5–0.7 s | ~0.5–0.7 s | ~0.6–1.0 s (HTTP overhead) |
 
-Numbers above are warm-cache decision phase for a single-tool prompt. Bench history is in [../benchmark/BENCH_RESULTS.md](../benchmark/BENCH_RESULTS.md).
+Latency numbers are warm-cache decision phase for a single-tool prompt. Bench history in [../benchmark/BENCH_RESULTS.md](../benchmark/BENCH_RESULTS.md).
 
-## 1. `python_custom_json/` — JSON + GBNF grammar
+---
 
-The "format guarantee" approach. The system prompt lists the available tools in plain text; the model is forced (via a GBNF grammar passed to llama.cpp) to emit either `{"final": "..."}` or `{"tool": "<name>", "args": {...}, "mode": "fast|natural"}`. The grammar makes malformed output impossible — but the grammar also forces specific token paths that can slow cold decode.
+## 1. `python_jaeger` ⭐⭐ — self-improving agent
 
-- **Decide phase:** grammar-constrained completion → `parse_decision()` → `ToolDecision`.
-- **Finalize phase:** another LLM call only when `mode="natural"`; `mode="fast"` returns the tool result directly (this is our oldest skip-final pattern — predates the pydantic-ai work).
-- **Best when:** the model is small/finicky and you need *guaranteed* parseable output.
-- **Worst when:** the model is large/well-tuned and the grammar slows it down for no benefit.
+**The flagship.** Production-grade agent that builds on `python_pydantic_ai`'s routing core and adds the guarantees you need to actually deploy: multi-instance isolation (lockfile + manifest + migration runner), versioned skill authoring (`<instance>/skills/<name>_v<N>/` with mandatory `SKILL.md` + `tests/smoke_test.py`), credential store (off-limits to direct file reads, only `get_credential(name)`), git auto-commit per agent-authored write, and a plugin system for MCP / messaging / background thinking.
 
-## 2. `python_hermes_xml/` — Hermes function-calling XML
+- **Loop:** pydantic-ai's `agent.iter()` with skip-final intercept on 24 tools.
+- **Sandbox:** per-instance — `<instance>/skills/` is the only writable area.
+- **Memory:** per-instance, gated behind `--with-memory` (auto-on in interactive chat).
+- **Plugins:** `plugins/mcp_bridge.py`, `plugins/thinking_runner.py`, `plugins/messaging/{discord,telegram,imessage,gateway}.py`.
+- **Best when:** you need a real shipping agent that can author its own skills, manages secrets safely, and gives you a real audit trail.
+- **Worst when:** you only need routing — the instance / manifest / skill-loader overhead is dead weight for one-shot routing benchmarks.
+
+**Full writeup:** [PYTHON_JAEGER.md](PYTHON_JAEGER.md)
+
+---
+
+## 2. `python_pydantic_ai` ⭐ — routing speed leader
+
+The lean Pydantic AI reference. Same `agent.iter()` skip-final core as jaeger, without the instance/skills/credentials overhead. Custom `LlamaCppModel` adapter so pydantic-ai's tool-call machinery talks to our in-process Gemma instead of an OpenAI/Anthropic endpoint.
+
+- **Loop:** `agent.iter()` with skip-final intercept on 17 tools (~280 ms saved per simple turn).
+- **Sandbox:** `python_pydantic_ai/workspace/`.
+- **Memory:** `python_pydantic_ai/memory/`, gated by `--with-memory`.
+- **Plugins:** same shape as jaeger's (MCP, thinking, messaging).
+- **Best when:** you want production-grade typed I/O, automatic retries, and the lowest warm-cache latency on simple commands.
+- **Worst when:** you need skill authoring or multi-tenant isolation — that's what jaeger adds on top.
+
+**Full writeup:** [PYTHON_PYDANTIC_AI.md](PYTHON_PYDANTIC_AI.md)
+
+---
+
+## 3. `python_hermes_xml` — Hermes function-calling XML
 
 The format the open-source [Hermes](https://huggingface.co/NousResearch) model series was trained on. Tools are declared as JSON Schema inside `<tools>...</tools>` in the system prompt; the model emits `<tool_call>{"name": "...", "arguments": {...}}</tool_call>`; tool results come back as `<tool_response>...</tool_response>` user turns.
 
-- **Decide phase:** unconstrained completion → `parse_decision()` parses the XML.
-- **Multi-step loop:** the model can keep emitting tool calls; we detect repeated calls and end after `max_steps` or when the model emits a `<final>` payload.
-- **Finalize phase:** optional `finalize()` LLM call when `mode="natural"`.
-- **Best when:** the underlying model was trained on this format (Hermes 1/2/3/4). Gemma 4 handles it well too via its `<tool_call>` token.
-- **Worst when:** you want type-safety on tool arguments — the model can emit any JSON; we validate at the tool boundary, not at the schema level.
+- **Loop:** three-phase decide → tool → finalize. Unconstrained decoding (no grammar).
+- **Drift recovery:** XML parser handles `<function_call>` variants, missing closing tags, etc.
+- **Best when:** the underlying model was trained on this format. Unconstrained decoding is ~10-20% faster than grammar-constrained per token.
+- **Worst when:** you need hard format guarantees — Gemma can emit malformed XML and the recovery is statistical, not hard.
 
-## 3. `python_pydantic_ai/` ⭐ — Pydantic AI
+**Full writeup:** [PYTHON_HERMES_XML.md](PYTHON_HERMES_XML.md)
 
-The wrapper around [pydantic-ai](https://github.com/pydantic/pydantic-ai). We provide a custom `LlamaCppModel` adapter so pydantic-ai's tool-call machinery talks to our in-process Gemma instead of an OpenAI/Anthropic endpoint.
+---
 
-- **Decide + finalize:** pydantic-ai owns the loop. We expose 19 tools via `@agent.tool_plain` decorators; MCP tools are registered dynamically through `Tool.from_schema(...)`.
-- **Skip-final optimization:** for tools whose result *is* the user-facing answer (`get_time`, `calculate`, `system_status`, `delete_file`, `speak`, …), we use `agent.iter()` to step through node-by-node and **break before the second `ModelRequestNode` fires**. The tool result is read directly out of `node.request.parts` and formatted — the final LLM call never happens. Saves ~280 ms per simple turn (3× faster on warm cache).
-- **Type safety:** each tool's args are validated through pydantic before dispatch. Bad coords/strings/numbers raise `ModelRetry` and the model gets a structured "fix this" message.
-- **Drift recovery:** Gemma sometimes emits its native `<|tool_call>call:name{...}<tool_call|>` instead of OpenAI-style `tool_calls`. `llm_model.py` salvages these via regex so we never lose a tool call to formatting drift.
-- **Best when:** you want production-grade typed I/O, automatic retries, and the lowest warm-cache latency on simple commands.
-- **Worst when:** you're debugging the loop itself — pydantic-ai's machinery is opaque compared to our hand-rolled frameworks.
+## 4. `python_custom_json` — JSON + GBNF grammar
 
-This is the framework `voice_assistant.py` defaults to. It's also the one we recommend for the robot agent.
+The format-safety reference. The model is forced (via a GBNF grammar at decode time) to emit either `{"tool": "<name>", "args": {...}}` or `{"final": "<answer>"}`. Malformed output is impossible by construction.
 
-## 4. `python_hermes_agent/` 🆕 — NousResearch hermes-agent
+- **Loop:** same three-phase decide → tool → finalize as `python_hermes_xml`.
+- **Grammar:** compiled once per tool list, cached by string identity.
+- **Best when:** the model is small (≤4B), untrusted, or you need a hard parse-safety guarantee.
+- **Worst when:** the model is large and well-tuned — grammar costs ~10-20% per token for a guarantee you don't need.
 
-Wraps the **full** NousResearch [hermes-agent](https://github.com/NousResearch/hermes-agent) framework. Where the first three are tool *routers*, this is a complete agent operating system: autonomous skill creation, FTS5 session search, Honcho dialectic user modeling, scheduled cron jobs, subagent delegation, Telegram/Discord/Slack/WhatsApp/Signal/Email gateways, 7 terminal backends (local, Docker, SSH, Singularity, Modal, Daytona, Vercel Sandbox).
+**Full writeup:** [PYTHON_CUSTOM_JSON.md](PYTHON_CUSTOM_JSON.md)
 
-We point it at our local Gemma so the LLM stays fully offline; only tool calls that need the internet (web search, fetch, etc.) leave the machine.
+---
 
-```
-hermes CLI ─HTTP─► llama_cpp.server (port 11435) ─► Gemma 4 26B-A4B
-   │
-   └─► 40+ built-in tools: web search / fetch / browser automation / terminal /
-       file ops / code execution / vision / TTS / skills / cron / messaging /
-       computer-use / session search / memory / task planning / clarify /
-       delegation / ...
-```
+## 5. `python_hermes_agent` — full Nous framework
+
+Wraps the **complete** NousResearch hermes-agent OS. Where the first four are tool routers, this is a full agent system: autonomous skill creation, FTS5 session search, Honcho user modeling, scheduled cron, subagent delegation, six messaging channels (Telegram/Discord/Slack/WhatsApp/Signal/Email), seven deploy backends (local/Docker/SSH/Singularity/Modal/Daytona/Vercel-Sandbox).
+
+We point it at our local Gemma over an OpenAI-compat HTTP server so the LLM stays fully offline; only tool calls that need the internet (web/search/fetch) leave the machine.
 
 - **Loop:** hermes-agent's own multi-turn agent loop. We don't intercept.
-- **Memory:** hermes' own — persistent skills + FTS5 session search + Honcho user modeling, stored under `~/.hermes/`. Separate from our shared `memory/` directory.
-- **Bench-comparable:** `python_hermes_agent/run_prompt.py` wraps `hermes chat -Q -q "..."` as a subprocess and returns the same `{text, elapsed_s, ...}` dict shape our other frameworks' `run_for_voice` returns.
-- **Best when:** you want generality — cron schedules, messaging, skill learning, parallel subagents — and you can tolerate a small HTTP hop per LLM call.
-- **Worst when:** you need narrow, fast, typed tool routing for a specific surface (e.g. a robot). The 40+ tool surface tends to drag down routing accuracy on a 4B-active MoE; the larger hermes prompt also eats more context.
+- **Memory:** hermes' own at `~/.hermes/` — separate from anything in this repo.
+- **Best when:** you want generality (cron, messaging, skill learning) and can tolerate the HTTP hop.
+- **Worst when:** you need narrow, fast, typed tool routing for a specific surface — the 40+ tool surface tends to drag down routing accuracy on a 4B-active MoE.
+
+**Full writeup:** [PYTHON_HERMES_AGENT.md](PYTHON_HERMES_AGENT.md)
+
+---
 
 ## How they compare for the robot use case
 
-Our north star is a robot agent that's fast, reliable, and runs locally. Ranking for that goal:
+The north star is a robot agent that's fast, reliable, and runs locally.
 
-1. **`python_pydantic_ai`** — typed tool args (safety), skip-final (speed), and `voice_assistant.py` already plugs it into AEC + barge-in + memory. Recommended.
-2. **`python_hermes_xml`** — same speed bracket, no type-safety on tool args, but it's also wired to `voice_assistant.py` for A/B.
-3. **`python_hermes_agent`** — phenomenal *capability* surface but the HTTP boundary + bigger system prompt + broader toolset hurts routing latency on a small local model. Better suited for non-realtime "operator on the side" workflows than for a robot's main control loop.
-4. **`python_custom_json`** — strict grammar is great for guarantees but the grammar slows decode. Keep as a fallback or for very small models.
+1. **`python_jaeger`** — when the robot needs persistent skills, per-deployment isolation, credential storage, and a real audit trail. Routes at the same speed as `python_pydantic_ai` since both share the `agent.iter()` skip-final core.
+2. **`python_pydantic_ai`** — when you don't need skill authoring; lighter setup, same warm-cache speed.
+3. **`python_hermes_xml`** — same speed bracket as pydantic_ai when the model handles the format well; lacks type-safety on tool args.
+4. **`python_custom_json`** — strict grammar is great for guarantees but slows decode; best as fallback for very small or untrusted models.
+5. **`python_hermes_agent`** — phenomenal capability surface but the HTTP boundary + bigger prompt + broader toolset hurts routing latency on a 4B-active MoE. Better suited for non-realtime "operator on the side" workflows than for a robot's main control loop.
+
+---
 
 ## How to run each
 
 ```bash
-# In-process three:
-.venv/bin/python main.py python_pydantic_ai "what time is it"
-.venv/bin/python main.py python_hermes_xml  "what time is it"
-.venv/bin/python main.py python_custom_json "what time is it"
+# Jaeger (recommended — instance-based, skill-versioned, plugins on tap):
+python -m python_jaeger                           # interactive chat (auto --with-memory)
+python -m python_jaeger "what time is it"         # one-shot
+python -m python_jaeger --with-mcp --think        # full extensions
 
-# hermes-agent (one-time setup, then start LLM server, then send prompts):
-python_hermes_agent/setup.sh
-python_hermes_agent/start_llm.sh &      # background or separate terminal
-.venv/bin/python python_hermes_agent/run_prompt.py "what time is it"
+# The other in-process three (via the main.py dispatcher):
+python main.py python_pydantic_ai "what time is it"
+python main.py python_hermes_xml  "what time is it"
+python main.py python_custom_json "what time is it"
 
-# Voice loop with framework swap:
-.venv/bin/python voice_assistant.py                            # → pydantic_ai
-VOICE_FRAMEWORK=hermes_xml .venv/bin/python voice_assistant.py # → hermes_xml
+# Hermes-agent (one-time setup, then start LLM server, then send prompts):
+cd python_hermes_agent
+./setup.sh
+./start_llm.sh &           # background or separate terminal
+python run_prompt.py "what time is it"
 
-# Bench the in-process three head-to-head:
-.venv/bin/python benchmark/bench.py
+# Bench all four in-process frameworks (one process per framework for clean Metal):
+python benchmark/bench.py --only python_jaeger --with-jaeger
+python benchmark/bench.py --only python_pydantic_ai
+python benchmark/bench.py --only python_hermes_xml
+python benchmark/bench.py --only python_custom_json
 ```
 
-The bench currently covers the three in-process frameworks (they share the same `benchmark/bench.py` interface). `python_hermes_agent/run_prompt.py` is the start of bench-equivalence for the fourth — the prompt-list loop is straightforward to add later if we want it in `benchmark/bench_history.jsonl`.
+The bench covers the four in-process frameworks via `benchmark/bench.py`. `python_hermes_agent/run_prompt.py` is the start of bench-equivalence for the fifth — wiring it into `benchmark/bench_history.jsonl` is a follow-up.
+
+---
+
+## Related docs
+
+- [PYTHON_JAEGER.md](PYTHON_JAEGER.md), [PYTHON_PYDANTIC_AI.md](PYTHON_PYDANTIC_AI.md), [PYTHON_HERMES_XML.md](PYTHON_HERMES_XML.md), [PYTHON_CUSTOM_JSON.md](PYTHON_CUSTOM_JSON.md), [PYTHON_HERMES_AGENT.md](PYTHON_HERMES_AGENT.md) — per-framework deep dives
+- [ARCHITECTURE.md](ARCHITECTURE.md) — request pipeline + framework differences
+- [AGENTIC_CODING_PRACTICE.md](AGENTIC_CODING_PRACTICE.md) — the v2 contract for AI agent developers
+- [../benchmark/BENCH_RESULTS.md](../benchmark/BENCH_RESULTS.md) — historical bench numbers

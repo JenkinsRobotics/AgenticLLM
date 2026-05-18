@@ -83,6 +83,7 @@ SKIP_FINAL_TOOLS = frozenset({
     "speak", "speak_file",
     "launch_url", "open_file", "open_app",
     "delegate",
+    "send_message",
 })
 
 
@@ -184,6 +185,10 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if result.get("delegated"):
             return str(result.get("answer") or "")
         return f"Delegation failed: {result.get('error', 'unknown')}"
+    if name == "send_message":
+        if result.get("sent"):
+            return "Sent."
+        return f"Couldn't send: {result.get('error', 'unknown')}"
     return str(result)
 
 
@@ -213,6 +218,20 @@ _pipeline: dict[str, Any] = {
     # the MANDATORY rules at the top of the system prompt enough to
     # cost ~3/23 on Gemma 4.
     "with_memory": False,
+    # MCP (Model Context Protocol) bridge — when on, jaeger connects to
+    # configured MCP servers at startup and re-exports their tools through
+    # the same agent surface. Each server's tools are registered dynamically
+    # from their JSON Schema, so adding a server takes no code change.
+    "with_mcp": False,
+    "mcp_specs": [],
+    # Background ThinkingRunner — fires a chain-of-thought call after each
+    # user turn on a single-worker pool, sharing the same LLM lock so it
+    # never decodes against the main loop. Logs to plugins/thinking.jsonl.
+    "with_thinking": False,
+    "thinking_runner": None,
+    # The active llama-cpp client (set by init_extensions). Plugins reach
+    # back through this when they need to issue their own LLM calls.
+    "client": None,
 }
 
 _session_histories: dict[str, list[Any]] = {}
@@ -249,7 +268,8 @@ def write_log(entry: dict[str, Any]) -> None:
     }
     with layout.latency_log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=True, default=str) + "\n")
-    _record_episodic(entry)
+    if _pipeline["with_memory"]:
+        _record_episodic(entry)
 
 
 def _record_episodic(entry: dict[str, Any]) -> None:
@@ -529,6 +549,39 @@ def _register_builtins(agent: Agent[None, str], client: Any) -> None:
         return _delegate_internal(client, subtask)
 
     @agent.tool_plain
+    def send_message(channel: str, recipient: str, text: str) -> dict:
+        """Send a proactive message to a user on a messaging channel.
+
+        Available `channel` values depend on which bridges are live in
+        this process — typically "discord", "telegram", "imessage".
+        `recipient` is the channel-specific ID (numeric Discord user ID,
+        Telegram chat ID, or iMessage phone/Apple-ID handle).
+
+        Use this together with `schedule_prompt` to send unattended
+        notifications: schedule a prompt that says "send the weather to
+        Discord user 12345" and the cron runner will fire it on time.
+        """
+        text_clean = (text or "").strip()
+        channel_clean = (channel or "").strip().lower()
+        recipient_clean = (recipient or "").strip()
+        if not channel_clean or not recipient_clean or not text_clean:
+            return {"sent": False, "error": "channel, recipient, and text are all required"}
+        try:
+            from .plugins.messaging import get_bridge, list_bridges
+        except Exception as exc:
+            return {"sent": False, "error": f"messaging plugin not importable: {exc}"}
+        bridge = get_bridge(channel_clean)
+        if bridge is None:
+            return {
+                "sent": False,
+                "error": f"no bridge registered for {channel_clean!r}; live bridges: {list_bridges()}",
+            }
+        try:
+            return bridge.send(recipient_clean, text_clean)
+        except Exception as exc:
+            return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
+
+    @agent.tool_plain
     def reload_skills() -> dict:
         """Re-scan core skills/ + instance skills/ and register any
         newly-authored or newly-versioned skills onto this agent.
@@ -615,9 +668,50 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     }
 
 
-def build_agent(client: Any, system_prompt: str) -> Agent[None, str]:
+def _build_mcp_tools(specs: list[Any]) -> list[Any]:
+    """Build Pydantic AI Tool objects for every MCP tool the bridge exposes.
+
+    Each MCP tool's advertised JSON Schema becomes the pydantic-ai tool
+    schema directly via Tool.from_schema, so adding a new MCP server in
+    plugins/mcp_config.json automatically surfaces its tools — no code
+    change required.
+    """
+    if not specs:
+        return []
+    from pydantic_ai import Tool
+
+    tools_list: list[Any] = []
+    for spec in specs:
+        schema = spec.input_schema if isinstance(spec.input_schema, dict) else {}
+        if not schema or "type" not in schema:
+            schema = {"type": "object", "properties": {}, **schema}
+
+        def _make_caller(qualified_name: str):
+            def _call(**kwargs: Any) -> dict[str, Any]:
+                from .plugins import mcp_bridge
+                return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
+            _call.__name__ = qualified_name.replace(":", "_").replace("/", "_")
+            return _call
+
+        tools_list.append(
+            Tool.from_schema(
+                function=_make_caller(spec.qualified_name),
+                name=spec.qualified_name,
+                description=spec.description or f"MCP tool {spec.qualified_name}",
+                json_schema=schema,
+            )
+        )
+    return tools_list
+
+
+def build_agent(client: Any, system_prompt: str, mcp_specs: list[Any] | None = None) -> Agent[None, str]:
     model = LlamaCppModel(client.llm)
-    agent: Agent[None, str] = Agent(model=model, system_prompt=system_prompt, tool_retries=2)
+    agent: Agent[None, str] = Agent(
+        model=model,
+        system_prompt=system_prompt,
+        tool_retries=2,
+        tools=_build_mcp_tools(mcp_specs or []),
+    )
     _register_builtins(agent, client)
     return agent
 
@@ -706,14 +800,17 @@ _agent_cache: dict[tuple, Agent[None, str]] = {}
 
 
 def _agent_key(client: Any) -> tuple:
-    return (id(client), hash(_pipeline["system_prompt"]))
+    mcp_fingerprint = tuple(sorted(
+        getattr(s, "qualified_name", "") for s in _pipeline.get("mcp_specs") or []
+    ))
+    return (id(client), hash(_pipeline["system_prompt"]), mcp_fingerprint)
 
 
 def _get_agent(client: Any) -> Agent[None, str]:
     key = _agent_key(client)
     if key not in _agent_cache:
         _agent_cache.clear()
-        agent = build_agent(client, _pipeline["system_prompt"])
+        agent = build_agent(client, _pipeline["system_prompt"], _pipeline.get("mcp_specs"))
         # Skill loader registers base + instance skills AFTER built-ins,
         # so an instance skill named `get_time_v2` would override the
         # built-in (intentional; honors the v2 override-via-versioning rule).
@@ -843,10 +940,148 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         if overflow > 0:
             del history[:overflow]
 
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+
+# ---------------------------------------------------------------------------
+# Bridging API — for plugins/messaging/gateway.py and other entry points
+# that need a structured-dict return rather than print-to-stdout.
+# ---------------------------------------------------------------------------
+def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:
+    """Same agent loop as `run_command`, but returns a dict instead of
+    printing. Mirrors python_pydantic_ai.run_for_voice. Messaging bridges
+    pass channel-specific session_keys ("telegram:12345", "discord:67890")
+    so each chat keeps its own context."""
+    key = session_key or "voice"
+    history = _get_session_history(key) if _pipeline["with_memory"] else None
+    agent = _get_agent(client)
+    model: LlamaCppModel = agent.model  # type: ignore[assignment]
+    model.reset_timings()
+    lock = _pipeline["llm_lock"]
+    started = time.perf_counter()
+    try:
+        if lock is not None:
+            with lock:
+                iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
+        else:
+            iter_out = asyncio.run(_run_via_iter(agent, user_text, history))
+    except Exception as exc:
+        return {
+            "text": "", "error": str(exc), "tool_activity": [],
+            "spoke_via_tool": False,
+            "elapsed_s": time.perf_counter() - started,
+        }
+
+    elapsed = time.perf_counter() - started
+    skipped = iter_out["skipped"]
+    first_decision = iter_out["first_decision"]
+    result = iter_out.get("result")
+
+    if skipped:
+        text = iter_out["skipped_text"] or ""
+        if first_decision is not None:
+            args = first_decision.get("args") or {}
+            args_repr = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2]) if isinstance(args, dict) else ""
+            tool_activity = [f"  ▸ {first_decision['tool']}({args_repr})"]
+        else:
+            tool_activity = []
+    else:
+        text = (result.output if hasattr(result, "output") else str(result)) or ""
+        text = text.strip()
+        tool_activity, walked = _walk_new_messages(result)
+        first_decision = first_decision or walked
+    spoke_via_tool = any("🔊" in line for line in tool_activity)
+
+    write_log({
+        "user": user_text, "session_key": key, "answer": text,
+        "tool_calls": len(tool_activity), "tool_activity": tool_activity,
+        "decision": first_decision, "skipped_final": skipped,
+        "latency": {"total": elapsed, "voice": True},
+    })
+
+    if _pipeline["with_memory"] and history is not None:
+        if skipped:
+            history.extend(iter_out["skipped_msgs"])
+        else:
+            try:
+                new_msgs = result.new_messages() if hasattr(result, "new_messages") else result.all_messages()
+            except Exception:
+                new_msgs = []
+            history.extend(new_msgs)
+        overflow = len(history) - _MAX_HISTORY_MESSAGES
+        if overflow > 0:
+            del history[:overflow]
+
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+    return {
+        "text": text, "tool_activity": tool_activity,
+        "spoke_via_tool": spoke_via_tool, "elapsed_s": elapsed,
+        "skipped_final": skipped,
+    }
+
+
+def init_extensions(args: Any, client: Any) -> None:
+    """Wire up memory / MCP / thinking based on CLI flags + env vars.
+    Mirrors python_pydantic_ai.init_extensions."""
+    with_memory = getattr(args, "with_memory", False) or os.environ.get("JAEGER_WITH_MEMORY") == "1"
+    with_mcp = getattr(args, "with_mcp", False) or os.environ.get("JAEGER_WITH_MCP") == "1"
+    with_thinking = getattr(args, "think", False) or os.environ.get("JAEGER_WITH_THINKING") == "1"
+
+    _pipeline["with_memory"] = with_memory
+    _pipeline["with_mcp"] = with_mcp
+    _pipeline["with_thinking"] = with_thinking
+    _pipeline["client"] = client
+
+    if with_mcp:
+        try:
+            from .plugins import mcp_bridge
+            registry = mcp_bridge.init_from_config()
+            specs = registry.list_tools()
+            _pipeline["mcp_specs"] = specs
+            if specs:
+                print(f"[jaeger] MCP enabled with {len(specs)} extended tool(s).", flush=True)
+        except Exception as exc:
+            print(f"[jaeger] --with-mcp failed: {exc}", file=sys.stderr, flush=True)
+
+    if with_thinking:
+        try:
+            from .plugins import thinking_runner
+            lock = _pipeline.get("llm_lock") or threading.Lock()
+            _pipeline["llm_lock"] = lock
+            _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
+                client, "python_jaeger", lock, _pipeline["system_prompt"]
+            )
+            print("[jaeger] background thinking enabled — see plugins/thinking.jsonl.", flush=True)
+        except Exception as exc:
+            print(f"[jaeger] --think failed: {exc}", file=sys.stderr, flush=True)
+
+
+def shutdown_extensions(wait: bool = True) -> None:
+    """Drain any background thinking jobs before tear-down."""
+    runner = _pipeline["thinking_runner"]
+    if runner is not None:
+        if runner.pending() > 0:
+            print("[jaeger] waiting for background thinking jobs...", flush=True)
+        runner.shutdown(wait=wait)
+
 
 # ---------------------------------------------------------------------------
 # Llama-cpp-python client shim
 # ---------------------------------------------------------------------------
+@dataclass
+class _ChatResult:
+    """Minimal completion shape ThinkingRunner expects."""
+    text: str
+    latency_s: float
+    ttft_s: float = 0.0
+
+
+
 class LlamaCppPythonClient:
     """Loads a Llama instance once and exposes `.llm` for LlamaCppModel."""
 
@@ -876,6 +1111,27 @@ class LlamaCppPythonClient:
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=1, temperature=0.0,
             )
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        top_p: float = 0.95,
+        stream: bool = False,
+        grammar: str | None = None,
+    ) -> _ChatResult:
+        """Minimal chat completion wrapper for ThinkingRunner.
+        Ignores `stream` and `grammar`. Returns text + wall-clock latency."""
+        started = time.perf_counter()
+        completion = self.llm.create_chat_completion(
+            messages=messages, max_tokens=max_tokens,
+            temperature=temperature, top_p=top_p, stream=False,
+        )
+        elapsed = time.perf_counter() - started
+        text = completion["choices"][0]["message"].get("content") or ""
+        return _ChatResult(text=text.strip(), latency_s=elapsed)
 
 
 # ---------------------------------------------------------------------------
@@ -1184,6 +1440,17 @@ def parse_args() -> argparse.Namespace:
                    help="Delete a stored credential by name and exit.")
     p.add_argument("--migrate", action="store_true",
                    help="Run any pending core migrations against this instance and exit.")
+    p.add_argument("--with-memory", action="store_true",
+                   help=("Carry conversation history across turns (load last 5 "
+                         "episodic turns + accumulate within session). Auto-on "
+                         "in interactive mode; off for one-shot/bench runs."))
+    p.add_argument("--with-mcp", action="store_true",
+                   help=("Connect to MCP servers from plugins/mcp_config.json "
+                         "and expose their tools through the agent surface."))
+    p.add_argument("--think", action="store_true",
+                   help=("Run a background chain-of-thought call after each "
+                         "user turn. Logs to plugins/thinking.jsonl. Shares the "
+                         "main LLM lock so it never decodes concurrently."))
     return p.parse_args()
 
 
@@ -1296,6 +1563,24 @@ def main() -> int:
             cron_runner.start()
 
         prompt = " ".join(args.prompt).strip()
+        # Interactive chat assumes the user wants the conversation to remember
+        # itself across turns. One-shot / bench runs default to off so the
+        # MANDATORY rules at the top of the system prompt aren't diluted by
+        # accumulated history. Explicit --with-memory always wins.
+        with_memory = bool(args.with_memory) or os.environ.get("JAEGER_WITH_MEMORY") == "1"
+        if not prompt and not with_memory:
+            with_memory = True
+        # Patch args so init_extensions picks up the resolved value
+        args.with_memory = with_memory
+
+        # Wire MCP / thinking / memory through one place. Also seeds
+        # _pipeline["llm_lock"] when --think is on, but only if it's not
+        # already set by the cron runner above.
+        prev_lock = _pipeline.get("llm_lock")
+        init_extensions(args, client)
+        if prev_lock is not None:
+            _pipeline["llm_lock"] = prev_lock
+
         try:
             if prompt:
                 run_command(client, prompt)
@@ -1304,6 +1589,7 @@ def main() -> int:
         finally:
             if cron_runner is not None:
                 cron_runner.shutdown(wait=False)
+            shutdown_extensions(wait=False)
     finally:
         lock.release()
 

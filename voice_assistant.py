@@ -41,15 +41,19 @@ import webrtcvad
 from scipy.signal import resample_poly
 
 
-# Framework adapter — picks pydantic_ai (default) or hermes_xml so we can
-# A/B compare under the same mic+TTS+AEC pipeline. Each framework exposes the
-# same surface: LlamaCppPythonClient, init_extensions(args, client),
-# run_for_voice(client, text), shutdown_extensions(wait), and a tools module
-# with ensure_workspace().
+# Framework adapter — picks pydantic_ai (default), hermes_xml, or jaeger so
+# we can A/B compare under the same mic+TTS+AEC pipeline. Each framework
+# exposes the same surface: LlamaCppPythonClient, init_extensions(args, client),
+# run_for_voice(client, text), shutdown_extensions(wait), and a tools module.
+#
+# jaeger is slightly different — its LlamaCppPythonClient takes a ModelConfig
+# object (not kwargs) and needs an instance dir bound before the model loads.
+# `load_agent_client()` branches on _VOICE_FRAMEWORK to handle that.
 _VOICE_FRAMEWORK = os.environ.get("VOICE_FRAMEWORK", "pydantic_ai").strip()
 _FRAMEWORK_MODULES = {
     "pydantic_ai": ("python_pydantic_ai.main", "python_pydantic_ai.tools"),
-    "hermes_xml": ("python_hermes_xml.main", "python_hermes_xml.tools"),
+    "hermes_xml":  ("python_hermes_xml.main",  "python_hermes_xml.tools"),
+    "jaeger":      ("python_jaeger.main",      "python_jaeger.core.tools"),
 }
 if _VOICE_FRAMEWORK not in _FRAMEWORK_MODULES:
     raise RuntimeError(
@@ -388,15 +392,55 @@ def find_wake(text: str) -> tuple[bool, str]:
     return False, ""
 
 
-# ── Agent (pydantic_ai) ───────────────────────────────────────────────
+# ── Agent ─────────────────────────────────────────────────────────────
+def _bootstrap_jaeger() -> "LlamaCppPythonClient":
+    """Jaeger-specific bootstrap: resolve the instance dir, bind tools, build
+    the system prompt, then construct the client from the instance's ModelConfig.
+
+    Instance comes from JAEGER_INSTANCE_NAME (default: "default"). The instance
+    dir must already exist — if it doesn't, point the user at the setup wizard
+    rather than half-creating one."""
+    from python_jaeger.core.instance import (
+        InstanceLayout, default_instance_name, resolve_instance_dir,
+    )
+    from python_jaeger.core.schemas import Config, load_yaml
+    from python_jaeger.core.prompts import build_system_prompt
+    from python_jaeger.main import _pipeline as jaeger_pipeline
+
+    instance_name = default_instance_name()
+    layout = InstanceLayout(root=resolve_instance_dir(instance_name))
+    if not layout.exists():
+        raise RuntimeError(
+            f"[agent] jaeger instance {instance_name!r} not initialized at "
+            f"{layout.root}. Run `python -m python_jaeger --setup` first."
+        )
+
+    config: Config = load_yaml(layout.config_path, Config)
+    agent_tools.bind(layout)
+    jaeger_pipeline["layout"] = layout
+    jaeger_pipeline["config"] = config
+    jaeger_pipeline["system_prompt"] = build_system_prompt(layout)
+    jaeger_pipeline["show_latency"] = False
+    jaeger_pipeline["show_tool_activity"] = True
+    jaeger_pipeline["show_help_on_start"] = False
+
+    return LlamaCppPythonClient(config.model, warmup=True)
+
+
 def load_agent_client():
     """Load the selected framework's client + extensions once. The Llama
     instance inside the client is the model we share with the agent.
-    Framework choice comes from VOICE_FRAMEWORK env var (default pydantic_ai;
-    `hermes_xml` for the head-to-head comparison)."""
+    Framework choice comes from VOICE_FRAMEWORK env var:
+      - pydantic_ai (default) — fastest routing, custom LlamaCppModel adapter
+      - hermes_xml            — hand-rolled XML format
+      - jaeger                — self-improving agent with instance isolation
+    """
     print(f"[agent] framework={_VOICE_FRAMEWORK} — loading {LLM_MODEL_PATH.name}...", flush=True)
     t0 = time.perf_counter()
-    client = LlamaCppPythonClient(model_path=LLM_MODEL_PATH, ctx=4096, warmup=True)
+    if _VOICE_FRAMEWORK == "jaeger":
+        client = _bootstrap_jaeger()
+    else:
+        client = LlamaCppPythonClient(model_path=LLM_MODEL_PATH, ctx=4096, warmup=True)
     print(f"[agent] loaded in {time.perf_counter()-t0:.1f}s", flush=True)
 
     # Memory on by default in voice mode — identity + episodic continuity.
@@ -406,9 +450,13 @@ def load_agent_client():
         think = False
 
     init_extensions(_Args(), client)
-    agent_tools.ensure_workspace()
-    # Prewarm only exists for python_pydantic_ai right now; ignore for
-    # other frameworks, which already pay this cost on their first turn.
+    # pydantic_ai / hermes_xml ship an ensure_workspace() helper for their
+    # workspace/ sandbox; jaeger uses an instance dir created by --setup so
+    # it doesn't need one.
+    ensure_workspace_fn = getattr(agent_tools, "ensure_workspace", None)
+    if ensure_workspace_fn is not None:
+        ensure_workspace_fn()
+    # Prewarm exists in pydantic_ai and jaeger; hermes_xml pays this on first turn.
     prewarm_fn = getattr(_FW_MAIN, "prewarm", None)
     if prewarm_fn is not None:
         prewarm_fn(client)
