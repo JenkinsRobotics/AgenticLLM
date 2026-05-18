@@ -1,53 +1,86 @@
 #!/usr/bin/env python3
-"""Head-to-head benchmark: Pygentic vs Hermes on the same prompt set.
+"""Full benchmark across every agentic framework in this repo.
 
-Loads each framework's model ONCE and runs the full prompt list against it,
-then writes a side-by-side comparison table. Each framework's per-prompt
-latency entries also land in its own logs/latency.jsonl (tagged with the
-framework name + a run_id), and an aggregate appends to bench_history.jsonl
-at the project root so historical runs are easy to compare.
+Runs the canonical 23-prompt suite against:
+  - python_custom_json   (raw JSON-emitting agent, in-process)
+  - python_hermes_xml    (XML tool-call agent, in-process)
+  - python_pydantic_ai   (pydantic-ai over Gemma, in-process)
+  - python_jaeger        (Jaeger v2 pipeline, in-process)
+  - python_hermes_agent  (NousResearch hermes-agent over HTTP via
+                          llama_cpp.server — driven by the `hermes` CLI)
+
+Every framework is loaded in its own subprocess (bench_worker.py) so each
+gets a fresh Metal context — back-to-back loads in a single process leak
+KV state across frameworks on Apple Silicon and trip `llama_decode -3`
+mid-bench. python_hermes_agent is the exception: it talks to a separate
+llama_cpp.server we start/stop here.
+
+Each run regenerates `benchmark/BENCHMARK.md` with:
+  1. Best record per framework (lowest latency ever, per prompt)
+  2. Latest run — per-prompt totals (cross-framework)
+  3. Per-tool average seconds (latest run, cross-framework)
+  4. Per-framework historical trend (last 5 runs)
+  5. Headlines
+
+Per-(framework × prompt × run) rows append to `bench_history.jsonl` so
+sections 1 and 4 stay meaningful across runs. Raw payload lands in
+`bench_results.json`.
 
 Run:
-  python bench.py                       # both frameworks, default prompts
-  python bench.py --only python_custom_json   # just one framework
-  python bench.py --prompts file.txt    # custom prompt list (one per line)
-  python bench.py --skip-run            # re-summarize existing logs
-  python bench.py --history             # show recent runs per prompt
+  python bench.py                                # all 5 frameworks, full suite
+  python bench.py --frameworks python_jaeger     # subset
+  python bench.py --runs 3                       # repeat each prompt N times
+  python bench.py --prompts custom.txt           # one prompt per line
+  python bench.py --skip-hermes-agent            # 4 in-process only
+  python bench.py --no-history --no-md           # one-off, JSON only
 """
 
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
+import re
+import socket
+import statistics
 import subprocess
 import sys
 import time
-from contextlib import redirect_stdout
+import urllib.request
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parent           # the benchmark/ dir
-PROJECT_ROOT = ROOT.parent                       # repo root; framework dirs live here
-# Make sibling framework packages importable regardless of cwd.
+ROOT = Path(__file__).resolve().parent           # benchmark/
+PROJECT_ROOT = ROOT.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+WORKER = ROOT / "bench_worker.py"
 HISTORY_PATH = ROOT / "bench_history.jsonl"
+JSON_OUT = ROOT / "bench_results.json"
+MD_OUT = ROOT / "BENCHMARK.md"
 
-# Sentinel value for the (prompt, expected_tool) tuples: skip validation.
-# Used for prompts loaded from a user file where we can't know what's expected.
-_SKIP_VALIDATION = "_skip_"
+VENV_PY = PROJECT_ROOT / ".venv" / "bin" / "python"
+HERMES_BIN = PROJECT_ROOT / ".venv" / "bin" / "hermes"
+LLM_PORT = int(os.environ.get("HERMES_LLM_PORT", "11435"))
+
+# Jaeger first: each framework load leaves KV residue on Metal. Putting
+# python_jaeger first gives it a clean context; python_pydantic_ai recovers
+# best from residue, so it goes last in the in-process group.
+IN_PROCESS_FRAMEWORKS_DEFAULT = (
+    "python_jaeger,python_custom_json,python_hermes_xml,python_pydantic_ai"
+)
 
 
-# Prompts are (text, expected_tool) pairs. expected_tool == None means the
-# prompt should be answered as a free-text final (no tool). expected_tool ==
-# "*" means we don't care which tool, just that A tool was picked. A failed
-# expectation is counted in the bench summary at the end of each run.
+# ---------------------------------------------------------------------------
+# Canonical prompt suite (mirrors BENCHMARK.md's historical 23-prompt set).
+# expected_tool uses the "common" name; Jaeger's surface is mapped via
+# JAEGER_TOOL_ALIASES so the per-tool table still groups correctly.
+# ---------------------------------------------------------------------------
 DEFAULT_PROMPTS: list[tuple[str, str | None]] = [
-    # General tool routing
     ("what time is it", "get_time"),
     ("what time is it in shanghai", "get_time"),
     ("calculate 47 times 23 plus 12", "calculate"),
@@ -62,7 +95,7 @@ DEFAULT_PROMPTS: list[tuple[str, str | None]] = [
     ("delete bench.txt", "delete_file"),
     ("what is the cpu and disk status of this machine", "system_status"),
 
-    # YouTube robot-content workflow
+    # YouTube robot-content workflow (create → append → speak → delete)
     ("search the web for trending youtube topics about home robots", "web_search"),
     ("write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt", "create_file"),
     ("append a closing line to youtube_intro.txt asking viewers to subscribe", "append_file"),
@@ -70,1099 +103,565 @@ DEFAULT_PROMPTS: list[tuple[str, str | None]] = [
     ("come up with a catchy youtube title for a video about a robot vacuum gone rogue", None),
     ("delete youtube_intro.txt", "delete_file"),
 
-    # Memory layer — natural phrasings, let the model pick its own keys
+    # Memory layer
     ("remember that my preferred youtube video length is 90 seconds", "remember"),
     ("what video length do I prefer?", "recall"),
     ("what do you know about me?", "list_facts"),
     ("forget my video length preference", "forget"),
 ]
 
-
-# Prompts that exercise MCP-only capability. Added to the regular set when
-# --with-mcp is passed. They should fail (or fall back to web_search) without MCP.
-MCP_PROMPTS: list[tuple[str, str | None]] = [
-    ("use the mcp:web/fetch tool to retrieve https://example.com and tell me what it says", "mcp:web/fetch"),
-    ("fetch the homepage of https://news.ycombinator.com using mcp:web/fetch and list the first three story titles", "mcp:web/fetch"),
-]
-
-
-def run_framework(name: str, prompts: list[tuple[str, str | None]]) -> list[dict[str, Any]]:
-    """Import the framework's agent, load its model once, run all prompts.
-
-    prompts is a list of (text, expected_tool) tuples. After each turn the
-    framework's most recent log entry is checked: did the chosen tool match
-    expected_tool? Was there a parse fallback? Mismatches are accumulated
-    and printed in the run summary.
-
-    python_jaeger is a special case: its tool surface differs by design
-    (`file_write` not `create_file`, sandboxed to `skills/`, etc.) so
-    strict expected_tool checks would always fail. We dispatch jaeger
-    through `bench_worker.py` (subprocess for Metal-safety) and apply
-    SOFT validation: "did SOME tool fire when expected_tool was non-None?".
-    """
-    if name == "python_jaeger":
-        return _run_jaeger_subprocess(prompts)
-
-    if name == "python_custom_json":
-        from python_custom_json.llm_client import LlamaCppPythonClient
-        from python_custom_json.main import init_from_env, run_command, shutdown_extensions
-        from python_custom_json.tools import ensure_workspace
-    elif name == "python_hermes_xml":
-        from python_hermes_xml.llm_client import LlamaCppPythonClient
-        from python_hermes_xml.main import init_from_env, run_command, shutdown_extensions
-        from python_hermes_xml.tools import ensure_workspace
-    elif name == "python_pydantic_ai":
-        from python_pydantic_ai.main import (
-            LlamaCppPythonClient,
-            init_from_env,
-            run_command,
-            shutdown_extensions,
-            ensure_workspace,
-        )
-    else:
-        raise ValueError(f"unknown framework: {name}")
-
-    log_path = PROJECT_ROOT / name / "logs" / "latency.jsonl"
-
-    print(f"\n=== {name}: loading model ===", flush=True)
-    client = LlamaCppPythonClient()
-    ensure_workspace()
-    init_from_env(client)
-
-    results: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
-    try:
-        for prompt_text, expected_tool in prompts:
-            print(f"\n--- {name} :: {prompt_text!r}", flush=True)
-            captured = io.StringIO()
-            started = time.perf_counter()
-            with redirect_stdout(captured):
-                run_command(client, prompt_text, "auto")
-            elapsed = time.perf_counter() - started
-            output = captured.getvalue()
-            print(output.rstrip(), flush=True)
-
-            # Read the just-written log entry for validation.
-            last_entry = _tail_log(log_path)
-            actual_tool = None
-            if last_entry:
-                dec = last_entry.get("decision") or {}
-                actual_tool = dec.get("tool") if isinstance(dec, dict) else None
-            parse_fallback = (last_entry or {}).get("parse_fallback")
-
-            verdict = _check_expectation(expected_tool, actual_tool, parse_fallback)
-            print(f"    [check] {verdict['summary']}", flush=True)
-            if verdict["status"] != "ok":
-                failures.append({
-                    "prompt": prompt_text,
-                    "expected_tool": expected_tool,
-                    "actual_tool": actual_tool,
-                    "parse_fallback": parse_fallback,
-                    "verdict": verdict["summary"],
-                })
-
-            results.append({
-                "prompt": prompt_text,
-                "elapsed_s": elapsed,
-                "output": output,
-                "expected_tool": expected_tool,
-                "actual_tool": actual_tool,
-                "parse_fallback": parse_fallback,
-                "verdict_status": verdict["status"],
-            })
-    finally:
-        shutdown_extensions(wait=True)
-        # Drop the Llama instance and force GC. Without this, residual KV
-        # state from earlier frameworks can poison llama_decode on Apple
-        # Metal — pydantic_ai (the 3rd framework) crashed with
-        # `llama_decode returned -3` until we added this cleanup.
-        try:
-            del client
-        except UnboundLocalError:
-            pass
-        import gc as _gc
-        _gc.collect()
-
-    # Per-framework summary
-    passed = sum(1 for r in results if r["verdict_status"] == "ok")
-    total = len(results)
-    print(f"\n[{name}] correctness: {passed}/{total} prompts passed expected_tool check.", flush=True)
-    for fail in failures:
-        print(f"  FAIL: {fail['prompt'][:60]!r}  ->  {fail['verdict']}", flush=True)
-
-    return results
+# Jaeger renamed a couple of tools when it sandboxed file I/O to skills/.
+# We keep the canonical name in DEFAULT_PROMPTS for the cross-framework
+# table and translate per-row when annotating Jaeger results.
+JAEGER_TOOL_ALIASES: dict[str, str] = {
+    "create_file": "file_write",
+    "list_directory": "list_skill_dir",
+}
 
 
-# ============================================================================
-# python_jaeger via subprocess (Metal-safety + different tool surface)
-# ============================================================================
-def _run_jaeger_subprocess(prompts: list[tuple[str, str | None]]) -> list[dict[str, Any]]:
-    """Dispatch the jaeger framework through `bench_worker.py`.
-
-    Each prompt's result is validated SOFTLY (tool-called? y/n) rather
-    than matched by exact tool name, because jaeger's surface is
-    intentionally different (file_write vs create_file, sandboxed paths).
-    A free-text reply when a tool was expected = fail; a tool call by
-    any name = pass.
-    """
-    worker = ROOT / "bench_worker.py"
-    if not worker.exists():
-        raise RuntimeError(f"bench_worker.py missing at {worker}")
-
-    prompt_texts = [p for p, _ in prompts]
-    prompts_blob = "\n".join(prompt_texts)
-    print(f"\n=== python_jaeger (subprocess via bench_worker.py) ===", flush=True)
+# ---------------------------------------------------------------------------
+# bench_worker.py invocation (in-process frameworks)
+# ---------------------------------------------------------------------------
+def run_via_worker(framework: str, prompts: list[str], timeout_s: float) -> list[dict[str, Any]]:
+    if not WORKER.exists():
+        raise FileNotFoundError(f"bench_worker.py missing at {WORKER}")
+    blob = "\n".join(prompts)
+    print(f"\n=== {framework} (subprocess worker, {len(prompts)} prompts) ===",
+          flush=True)
     try:
         proc = subprocess.run(
-            [sys.executable, str(worker), "python_jaeger"],
-            input=prompts_blob, capture_output=True, text=True,
-            timeout=1200,
+            [sys.executable, str(WORKER), framework],
+            input=blob, capture_output=True, text=True, timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
-        print("[python_jaeger] subprocess TIMEOUT (20min)", flush=True)
-        return [_jaeger_fail_row(p, t, "subprocess timeout") for p, t in prompts]
-
+        print(f"[{framework}] TIMEOUT after {timeout_s:.0f}s", flush=True)
+        return [{"framework": framework, "prompt": p, "text": "",
+                 "tool_activity": [], "elapsed_s": 0.0,
+                 "error": f"subprocess timeout after {timeout_s:.0f}s"} for p in prompts]
     if proc.stderr:
-        # Worker prints its progress to stderr — surface it live.
         print(proc.stderr, flush=True)
 
-    payload: dict[str, Any] = {}
     json_line = ""
     for line in (proc.stdout or "").splitlines():
         if line.strip().startswith("{"):
-            json_line = line.strip()  # last JSON-shaped line wins
-    if json_line:
+            json_line = line.strip()
+    if not json_line:
+        print(f"[{framework}] worker stdout had no JSON (exit {proc.returncode}); tail:",
+              flush=True)
+        print((proc.stdout or "")[-2000:], flush=True)
+        return [{"framework": framework, "prompt": p, "text": "",
+                 "tool_activity": [], "elapsed_s": 0.0,
+                 "error": f"worker exit {proc.returncode}, no JSON"} for p in prompts]
+    payload = json.loads(json_line)
+    if proc.returncode != 0 and payload.get("results"):
+        print(f"[{framework}] worker exited {proc.returncode} after producing "
+              "valid JSON (likely Metal atexit assert — harmless)", flush=True)
+    return payload.get("results", [])
+
+
+# ---------------------------------------------------------------------------
+# python_hermes_agent — HTTP via llama_cpp.server + `hermes chat -Q -q`
+# ---------------------------------------------------------------------------
+def _wait_for_port(host: str, port: int, timeout_s: float = 60.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
         try:
-            payload = json.loads(json_line)
-        except json.JSONDecodeError as exc:
-            print(f"[python_jaeger] worker stdout not JSON: {exc}", flush=True)
+            with socket.create_connection((host, port), timeout=1.0):
+                return True
+        except OSError:
+            time.sleep(0.5)
+    return False
 
-    worker_results = payload.get("results", [])
-    if not worker_results:
-        # Worker died before producing usable output. Surface tail of stderr/stdout
-        # and return failure rows so the bench summary still completes.
-        print(f"[python_jaeger] worker exit {proc.returncode}; stdout/stderr tail:", flush=True)
-        print(proc.stdout[-1000:], flush=True)
-        print(proc.stderr[-1000:], flush=True)
-        return [_jaeger_fail_row(p, t, f"worker exit {proc.returncode}, no JSON") for p, t in prompts]
-    if proc.returncode != 0:
-        print(f"[python_jaeger] worker exited {proc.returncode} after producing valid JSON "
-              "(likely Metal atexit assert — harmless)", flush=True)
 
-    # Map worker results back to bench.py's result shape with SOFT validation.
-    results: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
-    by_prompt = {r["prompt"]: r for r in worker_results}
-    for prompt_text, expected_tool in prompts:
-        wr = by_prompt.get(prompt_text)
-        if wr is None:
-            print(f"  [check] {prompt_text!r} — missing from worker output", flush=True)
-            failures.append({"prompt": prompt_text, "verdict": "missing from worker output"})
-            results.append(_jaeger_fail_row(prompt_text, expected_tool, "missing from worker output"))
-            continue
-
-        # Identify whether the worker ran a tool. The worker captures
-        # tool_activity lines like "▸ get_time()" — non-empty = tool fired.
-        tool_activity: list[str] = wr.get("tool_activity") or []
-        # Try to scrape the FIRST tool name out of the activity line(s) for the log.
-        actual_tool: str | None = None
-        for line in tool_activity:
-            stripped = line.strip()
-            for prefix in ("▸ ", "🔊 ", "💾 ", "🗑 ", "🔍 ", "🌐 ", "📱 ", "📂 "):
-                if stripped.startswith(prefix):
-                    rest = stripped[len(prefix):]
-                    # Parse "tool_name(args)" — keep only up to '(' or whitespace.
-                    for sep in ("(", " "):
-                        if sep in rest:
-                            rest = rest.split(sep, 1)[0]
-                            break
-                    actual_tool = rest.strip() or None
+def start_llama_server(log_path: Path) -> subprocess.Popen:
+    from model_resolver import resolve_model_path
+    model = str(resolve_model_path())
+    if not Path(model).exists():
+        raise FileNotFoundError(f"model not found: {model}")
+    cmd = [
+        str(VENV_PY), "-m", "llama_cpp.server",
+        "--model", model,
+        "--host", "127.0.0.1",
+        "--port", str(LLM_PORT),
+        # hermes-agent prefills ~12-14K tokens of system + tool schema before
+        # the user message; 32K leaves headroom (Gemma 4 trained on 262K).
+        "--n_ctx", "32768",
+        "--n_gpu_layers", "-1",
+        # No --chat_format: let llama-cpp-python read the GGUF's embedded
+        # template. The hardcoded "gemma" template is for Gemma 1/2 and
+        # leaks <|channel>thought\n markers on Gemma 4.
+        "--model_alias", "gemma-4-26b-a4b",
+    ]
+    log_fh = log_path.open("w")
+    print(f"\n=== starting local LLM server on :{LLM_PORT} (log: {log_path.name}) ===",
+          flush=True)
+    proc = subprocess.Popen(cmd, stdout=log_fh, stderr=subprocess.STDOUT,
+                            cwd=str(PROJECT_ROOT))
+    if not _wait_for_port("127.0.0.1", LLM_PORT, timeout_s=120.0):
+        proc.terminate()
+        raise RuntimeError(f"LLM server didn't open :{LLM_PORT} in 120s")
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{LLM_PORT}/v1/models",
+                                        timeout=2) as resp:
+                if resp.status == 200:
                     break
-            if actual_tool:
-                break
+        except Exception:
+            time.sleep(0.5)
+    print(f"[llm-server] ready (pid={proc.pid})", flush=True)
+    return proc
 
-        # SOFT validation: did some tool fire when expected, and did it
-        # NOT fire when free-text was expected?
-        if expected_tool == _SKIP_VALIDATION:
-            status, summary = "ok", "(validation skipped)"
-        elif expected_tool is None:
-            if not tool_activity:
-                status, summary = "ok", "free-text as expected"
-            else:
-                status, summary = "warn", f"expected free-text, got tool={actual_tool!r}"
-        else:
-            # Expected a tool call; ANY tool counts as a pass under soft validation.
-            if tool_activity:
-                status = "ok"
-                summary = f"soft-pass: any tool — got {actual_tool!r} (strict expected {expected_tool!r})"
-            else:
-                status = "fail"
-                summary = f"expected SOME tool (strict: {expected_tool!r}), got free-text"
 
-        print(f"  [check] {prompt_text[:55]!r:60s}  {summary}", flush=True)
-        if status != "ok":
-            failures.append({"prompt": prompt_text, "verdict": summary, "actual_tool": actual_tool})
+def stop_llama_server(proc: subprocess.Popen | None) -> None:
+    if proc is None:
+        return
+    print(f"\n=== stopping local LLM server (pid={proc.pid}) ===", flush=True)
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
-        results.append({
-            "prompt": prompt_text,
-            "elapsed_s": wr.get("elapsed_s", 0.0),
-            "output": wr.get("text", ""),
-            "expected_tool": expected_tool,
-            "actual_tool": actual_tool,
-            "parse_fallback": None,
-            "verdict_status": status,
-        })
 
-    passed = sum(1 for r in results if r["verdict_status"] == "ok")
-    print(f"\n[python_jaeger] correctness (SOFT): {passed}/{len(results)} prompts called a tool when expected.", flush=True)
-    for fail in failures:
-        print(f"  FAIL: {fail['prompt'][:60]!r}  ->  {fail['verdict']}", flush=True)
+def run_hermes_agent(prompts: list[str], timeout_s: float = 240.0) -> list[dict[str, Any]]:
+    if not HERMES_BIN.exists():
+        raise FileNotFoundError("hermes CLI missing — run python_hermes_agent/setup.sh")
+
+    results: list[dict[str, Any]] = []
+    for prompt in prompts:
+        print(f"\n--- python_hermes_agent :: {prompt!r}", flush=True)
+        t0 = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                [str(HERMES_BIN), "chat", "-Q", "-q", prompt],
+                capture_output=True, text=True, timeout=timeout_s,
+                cwd=str(PROJECT_ROOT),
+            )
+            elapsed = time.perf_counter() - t0
+            stdout = proc.stdout or ""
+            # Strip any leaked Gemma channel markers.
+            stdout = re.sub(r"<\|channel>\s*[a-zA-Z_]+\s*", "", stdout)
+            stdout = re.sub(r"<\s*/?\s*channel\s*\|?\s*>", "", stdout)
+            stdout = re.sub(r"^session_id:.*$", "", stdout, flags=re.MULTILINE)
+            text = stdout.strip()
+            print(f"  elapsed: {elapsed:.2f}s (exit={proc.returncode})")
+            results.append({
+                "framework": "python_hermes_agent",
+                "prompt": prompt,
+                "text": text,
+                "tool_activity": [],
+                "elapsed_s": elapsed,
+                "error": proc.stderr.strip()[:400] if proc.returncode != 0 else None,
+            })
+        except subprocess.TimeoutExpired:
+            elapsed = time.perf_counter() - t0
+            print(f"  TIMEOUT after {timeout_s:.0f}s", flush=True)
+            results.append({
+                "framework": "python_hermes_agent",
+                "prompt": prompt, "text": "", "tool_activity": [],
+                "elapsed_s": elapsed,
+                "error": f"timeout after {timeout_s:.0f}s",
+            })
     return results
 
 
-def _jaeger_fail_row(prompt: str, expected: str | None, why: str) -> dict[str, Any]:
-    return {
-        "prompt": prompt,
-        "elapsed_s": 0.0,
-        "output": "",
-        "expected_tool": expected,
-        "actual_tool": None,
-        "parse_fallback": None,
-        "verdict_status": "fail",
-        "error": why,
-    }
+# ---------------------------------------------------------------------------
+# Tool inference from `tool_activity` lines printed by run_command()
+# ---------------------------------------------------------------------------
+_TOOL_RE = re.compile(r"▸\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
 
 
-def _tail_log(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
+def infer_tool(tool_activity: list[str]) -> str | None:
+    for line in tool_activity:
+        m = _TOOL_RE.search(line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def expected_for(framework: str, canonical_tool: str | None) -> str | None:
+    """Translate the canonical expected tool name to a framework-specific
+    alias. Today only python_jaeger renames anything."""
+    if canonical_tool is None:
         return None
-    try:
-        with path.open("rb") as handle:
-            handle.seek(0, 2)
-            size = handle.tell()
-            chunk = min(8192, size)
-            handle.seek(max(0, size - chunk))
-            data = handle.read().decode("utf-8", errors="replace")
-        last_line = data.rstrip().rsplit("\n", 1)[-1]
-        return json.loads(last_line)
-    except Exception:
-        return None
+    if framework == "python_jaeger":
+        return JAEGER_TOOL_ALIASES.get(canonical_tool, canonical_tool)
+    return canonical_tool
 
 
-def _check_expectation(
-    expected_tool: str | None,
-    actual_tool: str | None,
-    parse_fallback: str | None,
-) -> dict[str, str]:
-    if expected_tool == _SKIP_VALIDATION:
-        return {"status": "ok", "summary": "(validation skipped)"}
-    if parse_fallback == "silent_format_fail":
-        return {"status": "fail", "summary": "silent format failure (model emitted malformed tool call, parsed as final)"}
-    if expected_tool is None:
-        if actual_tool is None:
-            return {"status": "ok", "summary": "final-answer as expected"}
-        return {"status": "warn", "summary": f"expected free-text final, got tool={actual_tool!r}"}
-    if expected_tool == "*":
-        return {"status": "ok", "summary": f"any tool — got {actual_tool!r}"} if actual_tool else {
-            "status": "fail",
-            "summary": "expected any tool, got final answer",
-        }
-    if actual_tool == expected_tool:
-        suffix = f" (recovered via {parse_fallback})" if parse_fallback else ""
-        return {"status": "ok", "summary": f"matched {expected_tool!r}{suffix}"}
-    return {
-        "status": "fail",
-        "summary": f"expected {expected_tool!r}, got {actual_tool!r}",
-    }
+# ---------------------------------------------------------------------------
+# History — append-only JSONL, one row per (framework × prompt × run)
+# ---------------------------------------------------------------------------
+def append_history(run_id: str, rows_by_fw: dict[str, list[dict[str, Any]]]) -> None:
+    with HISTORY_PATH.open("a", encoding="utf-8") as fh:
+        for fw, rows in rows_by_fw.items():
+            for r in rows:
+                fh.write(json.dumps({
+                    "run_id": run_id,
+                    "mode_tag": "default",
+                    "framework": fw,
+                    "prompt": r["prompt"],
+                    "expected_tool": r.get("expected_tool"),
+                    "called_tool": r.get("called_tool"),
+                    "total": r["elapsed_s"],
+                    "error": r.get("error"),
+                    "text": (r.get("text") or "")[:200],
+                }) + "\n")
 
 
-def _prompt_texts(prompts: list[tuple[str, str | None]] | list[str]) -> list[str]:
-    """Accept either a list of strings or a list of (text, expected_tool) tuples."""
-    out: list[str] = []
-    for item in prompts:
-        if isinstance(item, tuple):
-            out.append(item[0])
-        else:
-            out.append(item)
+def load_history() -> list[dict[str, Any]]:
+    if not HISTORY_PATH.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for line in HISTORY_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
     return out
 
 
-def _framework_log_path(framework: str) -> Path:
-    """Per-framework latency log location. Jaeger writes logs into its
-    instance dir (default: python_jaeger/instance/default/logs/), not
-    a framework-root logs/. The other three use the conventional
-    <framework>/logs/latency.jsonl path."""
-    if framework == "python_jaeger":
-        return PROJECT_ROOT / "python_jaeger" / "instance" / "default" / "logs" / "latency.jsonl"
-    return PROJECT_ROOT / framework / "logs" / "latency.jsonl"
+# ---------------------------------------------------------------------------
+# Markdown rendering
+# ---------------------------------------------------------------------------
+def _fmt(value: float | None) -> str:
+    return f"{value:.3f}" if value is not None else "—"
 
 
-def latest_log_entries(
-    framework: str,
-    run_id: str | None,
-    prompts: list[tuple[str, str | None]] | list[str],
-) -> dict[str, dict[str, Any]]:
-    """Return the most recent log entry per prompt for this framework."""
-    log_path = _framework_log_path(framework)
-    by_prompt: dict[str, dict[str, Any]] = {}
-    if not log_path.exists():
-        return by_prompt
-    prompt_texts = set(_prompt_texts(prompts))
-    with log_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get("framework") != framework:
-                continue
-            user = entry.get("user")
-            if user not in prompt_texts:
-                continue
-            if run_id is not None and entry.get("run_id") != run_id:
-                continue
-            by_prompt[user] = entry
-    return by_prompt
+def _tool_label(name: str | None) -> str:
+    return f"`{name}`" if name else "`(free-text)`"
 
 
-def append_history(
-    run_id: str,
-    frameworks: list[str],
-    prompts: list[tuple[str, str | None]] | list[str],
-    mode_tag: str,
-) -> None:
-    """After a bench run, append one aggregate line per (framework, prompt)."""
-    with HISTORY_PATH.open("a", encoding="utf-8") as handle:
-        for fw in frameworks:
-            entries = latest_log_entries(fw, run_id, prompts)
-            for prompt in _prompt_texts(prompts):
-                entry = entries.get(prompt)
-                if entry is None:
-                    continue
-                latency = entry.get("latency") or {}
-                record = {
-                    "run_id": run_id,
-                    "mode_tag": mode_tag,
-                    "framework": fw,
-                    "prompt": prompt,
-                    "total": latency.get("total"),
-                    "decision_ttft": latency.get("decision_ttft"),
-                    "decision": latency.get("decision"),
-                    "tool": latency.get("tool"),
-                    "final": latency.get("final"),
-                    "mode": entry.get("mode"),
-                }
-                handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+def _short(prompt: str, n: int = 50) -> str:
+    return prompt if len(prompt) <= n else prompt[: n - 3] + "..."
 
 
-def print_comparison(
-    prompts: list[tuple[str, str | None]] | list[str],
-    chosen: list[str],
-    run_id: str | None,
-) -> None:
-    logs = {fw: latest_log_entries(fw, run_id, prompts) for fw in chosen}
-    for fw in chosen:
-        if not logs[fw]:
-            logs[fw] = latest_log_entries(fw, None, prompts)
+def render_markdown(*, run_id: str,
+                    prompts: list[tuple[str, str | None]],
+                    frameworks: list[str],
+                    latest: dict[str, dict[str, dict[str, Any]]],
+                    history: list[dict[str, Any]]) -> str:
+    """latest[fw][prompt] = {elapsed_s, text, called_tool, ...}"""
 
-    header_parts = ["prompt".ljust(48)]
-    for fw in chosen:
-        header_parts.append(f"{fw} total".rjust(12))
-        header_parts.append(f"{fw} ttft".rjust(10))
-    header = " ".join(header_parts)
-    print("\n" + header)
-    print("-" * len(header))
-    for prompt in _prompt_texts(prompts):
-        display = (prompt[:45] + "...") if len(prompt) > 48 else prompt
-        parts = [display.ljust(48)]
-        for fw in chosen:
-            entry = logs.get(fw, {}).get(prompt) or {}
-            latency = entry.get("latency") or {}
-            total = latency.get("total")
-            ttft = latency.get("decision_ttft")
-            parts.append(("%.3f" % total if total is not None else "  -").rjust(12))
-            parts.append(("%.3f" % ttft if ttft is not None else "  -").rjust(10))
-        print(" ".join(parts))
-
-
-def write_results_doc() -> int:
-    """Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl AND
-    a shorter root-level BENCHMARK.md for at-a-glance frequent checks.
-
-    Both files are auto-regenerated; do not hand-edit them.
-    """
-    from collections import defaultdict
-
-    original = [
-        "what time is it",
-        "calculate 47 times 23 plus 12",
-        "list the workspace",
-        "make a file called bench.txt with the message hello from the benchmark",
-        "read bench.txt out loud",
-        "search the web for recent news about local llms",
-        "tell me a one sentence story about a robot",
-        "delete bench.txt",
-        "what is the cpu and disk status of this machine",
-    ]
-    all_prompts = original + [
-        "what time is it in shanghai",
-        "search the web for trending youtube topics about home robots",
-        "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
-        "append a closing line to youtube_intro.txt asking viewers to subscribe",
-        "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
-        "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
-        "delete youtube_intro.txt",
-        "remember that my preferred youtube video length is 90 seconds",
-        "what video length do I prefer?",
-        "what do you know about me?",
-        "forget my video length preference",
-    ]
-
-    if not HISTORY_PATH.exists():
-        print("bench_history.jsonl not found — run `python bench.py` first.")
-        return 1
-
-    runs: dict[tuple[str, str], dict[str, dict[str, tuple[float | None, float | None]]]] = defaultdict(lambda: defaultdict(dict))
-    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                e = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            rid = e.get("run_id") or "(legacy)"
-            mt = e.get("mode_tag") or "default"
-            fw = e.get("framework")
-            if not fw:
-                continue
-            runs[(rid, mt)][fw][e.get("prompt", "")] = (e.get("total"), e.get("decision_ttft"))
-
-    latest: dict[str, str] = {}
-    for (rid, mt) in runs:
-        if mt not in latest or rid > latest[mt]:
-            latest[mt] = rid
-    if "default" not in latest:
-        print("No `default` mode runs found in bench_history.jsonl.")
-        return 1
-
-    default_runs = sorted({rid for (rid, mt) in runs if mt == "default"})
-
-    def short(p: str, n: int = 48) -> str:
-        return p[: n - 3] + "..." if len(p) > n else p
-
-    out: list[str] = []
-    out.append("# Benchmark results")
-    out.append("")
-    out.append("Snapshot of the latest bench runs across modes. Regenerate with:")
-    out.append("")
-    out.append("```bash")
-    out.append("python bench.py                  # adds a fresh default run to bench_history.jsonl")
-    out.append("python bench.py --write-results  # rewrites this file from the latest entries")
-    out.append("```")
-    out.append("")
-    out.append("See [BENCHMARKING.md](BENCHMARKING.md) for bench mechanics and mode flags.")
-    out.append("")
-
-    r12 = latest["default"]
-    out.append("## Current baseline — default mode")
-    out.append("")
-    out.append(f"Run `{r12}`.")
-    out.append("")
-    out.append("| prompt | python_custom_json total | python_custom_json ttft | python_hermes_xml total | python_hermes_xml ttft |")
-    out.append("|---|---:|---:|---:|---:|")
-    for p in all_prompts:
-        pyg = runs[(r12, "default")]["python_custom_json"].get(p, (None, None))
-        her = runs[(r12, "default")]["python_hermes_xml"].get(p, (None, None))
-        cells = [
-            short(p),
-            f"{pyg[0]:.3f}" if pyg[0] is not None else "–",
-            f"{pyg[1]:.3f}" if pyg[1] is not None else "–",
-            f"{her[0]:.3f}" if her[0] is not None else "–",
-            f"{her[1]:.3f}" if her[1] is not None else "–",
-        ]
-        out.append("| " + " | ".join(cells) + " |")
-    out.append("")
-
-    if len(default_runs) >= 4:
-        key_runs = [
-            ("r1 first baseline", default_runs[0]),
-            (f"r{len(default_runs)-1} prior", default_runs[-2]),
-            (f"r{len(default_runs)} latest", default_runs[-1]),
-        ]
-        out.append("## Historical consistency — original 9 prompts")
-        out.append("")
-        out.append("Spot-check for regressions: if the latest column drifts >50% from r1 on")
-        out.append("the simple-tool prompts (calc, list, delete, cpu/disk), investigate.")
-        out.append("")
-        for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
-            out.append(f"### {fw.capitalize()} — total (seconds)")
-            out.append("")
-            header = "| prompt |" + "".join(f" {label} |" for label, _ in key_runs)
-            out.append(header)
-            out.append("|---" + "|---:" * len(key_runs) + "|")
-            for p in original:
-                cells = [f"| {short(p)} |"]
-                for _, rid in key_runs:
-                    v = runs[(rid, "default")][fw].get(p, (None,))[0]
-                    cells.append(f" {v:.3f} |" if v is not None else " – |")
-                out.append("".join(cells))
-            out.append("")
-
-    out.append("## Mode comparison — latest run per mode")
-    out.append("")
-    modes_order = ["default", "think", "memory", "mcp", "mcp+think+memory"]
-    modes = [(mt, latest[mt]) for mt in modes_order if mt in latest]
-    for mt, rid in modes:
-        out.append(f"- **{mt}** ⟶ run `{rid}`")
-    out.append("")
-    for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
-        out.append(f"### {fw.capitalize()} — total (seconds)")
-        out.append("")
-        header = "| prompt |" + "".join(f" {mt} |" for mt, _ in modes)
-        out.append(header)
-        out.append("|---" + "|---:" * len(modes) + "|")
-        for p in all_prompts:
-            cells = [f"| {short(p)} |"]
-            for mt, rid in modes:
-                v = runs[(rid, mt)][fw].get(p, (None,))[0]
-                cells.append(f" {v:.3f} |" if v is not None else " – |")
-            out.append("".join(cells))
-        out.append("")
-
-    out.append("## What to watch for in future runs")
-    out.append("")
-    out.append("- **Pygentic single-tool prompts** (calculate, list, delete, cpu/disk) should stay around 0.6–1.2 s. A jump to 3 s+ means the multi-step loop is firing when it shouldn't.")
-    out.append("- **Hermes single-tool prompts** should stay around 0.5–1.1 s.")
-    out.append("- **TTFT** for warm prompts should be ~0.10–0.15 s on both. Spikes to 0.5 s+ indicate a KV cache miss.")
-    out.append("- **Memory prompts** route reliably only with `--with-memory`. Raw-mode failures there are expected, not regressions.")
-    out.append("- **TTS prompts** are wall-clock-dominated by audio playback. Variance there is normal.")
-
-    path = ROOT / "BENCH_RESULTS.md"
-    path.write_text("\n".join(out), encoding="utf-8")
-    print(f"wrote {path.relative_to(ROOT)} ({len(out)} lines, {len(default_runs)} default runs, {len(modes)} modes)")
-
-    # Also write the shorter root-level BENCHMARK.md
-    _write_root_benchmark(runs, latest, original, all_prompts)
-    return 0
-
-
-def _expected_tool_map() -> dict[str, str | None]:
-    """Mirror of bench.py's DEFAULT_PROMPTS expected_tool mapping."""
-    return {text: expected for text, expected in DEFAULT_PROMPTS}
-
-
-def _write_root_benchmark(
-    runs: dict,
-    latest: dict[str, str],
-    original_prompts: list[str],
-    all_prompts: list[str],
-) -> None:
-    """Write a compact, at-a-glance BENCHMARK.md at the project root.
-
-    Four sections:
-      1. Best record per framework (lowest latency ever per prompt)
-      2. Latest 3-way comparison
-      3. Per-tool average (latest run)
-      4. Per-framework historical trend (last N runs)
-    """
-    if "default" not in latest:
-        return
-
-    target_frameworks = ("python_custom_json", "python_hermes_xml", "python_pydantic_ai")
-    matching_runs = [
-        rid
-        for (rid, mt) in runs
-        if mt == "default"
-        and all(fw in runs[(rid, mt)] for fw in target_frameworks)
-    ]
-    if matching_runs:
-        run_id = max(matching_runs)
-    else:
-        run_id = latest["default"]
-    frameworks_in_run = [fw for fw in target_frameworks if fw in runs[(run_id, "default")]]
-    if not frameworks_in_run:
-        return
-
-    expected = _expected_tool_map()
-
-    # Index of all default-mode runs for the current framework names.
-    # Skip runs that have ZERO data for a framework so we don't show empty
-    # leading columns in the trend tables.
-    default_runs_per_fw: dict[str, list[tuple[str, dict[str, float]]]] = {fw: [] for fw in target_frameworks}
-    for (rid, mt), frameworks in runs.items():
-        if mt != "default":
+    # ---- Pre-compute best-of-bests per (framework, prompt) ----
+    best: dict[str, dict[str, float]] = defaultdict(dict)
+    for rec in history:
+        fw = rec.get("framework")
+        p = rec.get("prompt")
+        t = rec.get("total")
+        if not fw or not p or t is None:
             continue
-        for fw, prompts_dict in frameworks.items():
-            if fw not in target_frameworks:
-                continue
-            totals_map = {p: v[0] for p, v in prompts_dict.items() if v[0] is not None}
-            if not totals_map:
-                continue  # nothing to show for this framework on this run
-            default_runs_per_fw[fw].append((rid, totals_map))
-    for fw in target_frameworks:
-        default_runs_per_fw[fw].sort(key=lambda x: x[0])
+        cur = best[fw].get(p)
+        if cur is None or t < cur:
+            best[fw][p] = t
+
+    # ---- Last 5 distinct run_ids per framework, in insertion order ----
+    fw_run_ids: dict[str, list[str]] = defaultdict(list)
+    for rec in history:
+        fw = rec.get("framework")
+        rid = rec.get("run_id")
+        if fw and rid and rid not in fw_run_ids[fw]:
+            fw_run_ids[fw].append(rid)
+    fw_last5: dict[str, list[str]] = {fw: ids[-5:] for fw, ids in fw_run_ids.items()}
+    # Per-(framework, prompt, run_id) lookup
+    fw_hist: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    for rec in history:
+        fw = rec.get("framework")
+        rid = rec.get("run_id")
+        p = rec.get("prompt")
+        if not fw or not rid or not p:
+            continue
+        if rid in fw_last5.get(fw, []):
+            fw_hist[fw][p][rid] = rec.get("total", 0.0)
 
     out: list[str] = []
     out.append("# Benchmark")
     out.append("")
-    out.append(f"Last run: `{run_id}` · frameworks: {', '.join(frameworks_in_run)}")
+    out.append(f"Last run: `{run_id}` · frameworks: {', '.join(frameworks)}")
     out.append("")
-    out.append(f"Regenerate with `python bench.py && python bench.py --write-results`.")
-    out.append(f"Detail history: [docs/BENCH_RESULTS.md](docs/BENCH_RESULTS.md).")
+    out.append("Regenerate with `python bench.py`. History: `bench_history.jsonl` "
+               "(one row per framework × prompt × run). Raw payload: `bench_results.json`.")
     out.append("")
 
-    # ============================================================================
-    # SECTION 1: Best record per framework (lowest ever seen per prompt)
-    # ============================================================================
+    # ---- 1. Best record per framework (lowest latency ever) ----
     out.append("## 1. Best record per framework (lowest latency ever)")
     out.append("")
-    out.append("Each cell = the fastest result that framework has *ever* achieved on this prompt across all default-mode runs in `bench_history.jsonl`. Useful as a personal best target.")
+    out.append("Each cell = the fastest result that framework has *ever* achieved on this "
+               "prompt across all runs in `bench_history.jsonl`. Useful as a personal best target.")
     out.append("")
-    header = "| prompt | tool |"
-    sep = "|---|---|"
-    for fw in frameworks_in_run:
-        header += f" {fw} best |"
-        sep += "---:|"
+    header = "| prompt | tool |" + "".join(f" {fw} best |" for fw in frameworks)
+    sep = "|---|---|" + "---:|" * len(frameworks)
     out.append(header)
     out.append(sep)
-    best_totals = {fw: 0.0 for fw in frameworks_in_run}
-    best_counts = {fw: 0 for fw in frameworks_in_run}
-    for prompt in all_prompts:
-        tool = expected.get(prompt) or "(free-text)"
-        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
-        for fw in frameworks_in_run:
-            values = [
-                totals_map[prompt]
-                for _, totals_map in default_runs_per_fw[fw]
-                if prompt in totals_map
-            ]
-            if values:
-                best = min(values)
-                best_totals[fw] += best
-                best_counts[fw] += 1
-                row += f" {best:.3f} |"
-            else:
-                row += " – |"
-        out.append(row)
-    sum_row = "| **best-of-bests total** | |"
-    avg_row = "| **best-of-bests avg** | |"
-    for fw in frameworks_in_run:
-        n = best_counts[fw] or 1
-        sum_row += f" **{best_totals[fw]:.2f}** |"
-        avg_row += f" **{best_totals[fw] / n:.3f}** |"
-    out.append(sum_row)
-    out.append(avg_row)
+    totals = {fw: 0.0 for fw in frameworks}
+    counts = {fw: 0 for fw in frameworks}
+    for prompt, tool in prompts:
+        cells = []
+        for fw in frameworks:
+            v = best[fw].get(prompt)
+            if v is not None:
+                totals[fw] += v
+                counts[fw] += 1
+            cells.append(_fmt(v))
+        out.append(f"| {_short(prompt)} | {_tool_label(tool)} | " + " | ".join(cells) + " |")
+    out.append("| **best-of-bests total** | |" +
+               "".join(f" **{totals[fw]:.2f}** |" for fw in frameworks))
+    out.append("| **best-of-bests avg** | |" +
+               "".join(f" **{(totals[fw] / counts[fw] if counts[fw] else 0):.3f}** |"
+                       for fw in frameworks))
     out.append("")
 
-    # ============================================================================
-    # SECTION 2: Latest 3-way comparison
-    # ============================================================================
+    # ---- 2. Latest run — per-prompt totals ----
     out.append("## 2. Latest run — per-prompt totals")
     out.append("")
-    header = "| prompt | tool |"
-    sep = "|---|---|"
-    for fw in frameworks_in_run:
-        header += f" {fw} |"
-        sep += "---:|"
+    header = "| prompt | tool |" + "".join(f" {fw} |" for fw in frameworks)
+    sep = "|---|---|" + "---:|" * len(frameworks)
     out.append(header)
     out.append(sep)
-    framework_totals = {fw: 0.0 for fw in frameworks_in_run}
-    framework_counts = {fw: 0 for fw in frameworks_in_run}
-    for prompt in all_prompts:
-        tool = expected.get(prompt) or "(free-text)"
-        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
-        for fw in frameworks_in_run:
-            v = runs[(run_id, "default")][fw].get(prompt, (None,))[0]
-            if v is not None:
-                framework_totals[fw] += v
-                framework_counts[fw] += 1
-                row += f" {v:.3f} |"
-            else:
-                row += " – |"
-        out.append(row)
-    sum_row = "| **TOTAL** | |"
-    avg_row = "| **AVG / prompt** | |"
-    for fw in frameworks_in_run:
-        n = framework_counts[fw] or 1
-        sum_row += f" **{framework_totals[fw]:.2f}** |"
-        avg_row += f" **{framework_totals[fw] / n:.3f}** |"
-    out.append(sum_row)
-    out.append(avg_row)
+    latest_totals = {fw: 0.0 for fw in frameworks}
+    latest_counts = {fw: 0 for fw in frameworks}
+    for prompt, tool in prompts:
+        cells = []
+        for fw in frameworks:
+            row = latest.get(fw, {}).get(prompt)
+            t = row.get("elapsed_s") if row else None
+            if t is not None:
+                latest_totals[fw] += t
+                latest_counts[fw] += 1
+            cells.append(_fmt(t))
+        out.append(f"| {_short(prompt)} | {_tool_label(tool)} | " + " | ".join(cells) + " |")
+    out.append("| **TOTAL** | |" +
+               "".join(f" **{latest_totals[fw]:.2f}** |" for fw in frameworks))
+    out.append("| **AVG / prompt** | |" +
+               "".join(f" **{(latest_totals[fw] / latest_counts[fw] if latest_counts[fw] else 0):.3f}** |"
+                       for fw in frameworks))
     out.append("")
 
-    # ============================================================================
-    # SECTION 3: Per-tool averages on the latest run
-    # ============================================================================
+    # ---- 3. Per-tool averages (latest run) ----
     out.append("## 3. Per-tool average seconds (latest run)")
     out.append("")
-    tool_groups: dict[str, list[str]] = {}
-    for prompt in all_prompts:
-        t = expected.get(prompt) or "(free-text)"
-        tool_groups.setdefault(t, []).append(prompt)
-    header = "| tool | n prompts |"
-    sep = "|---|---:|"
-    for fw in frameworks_in_run:
-        header += f" {fw} avg |"
-        sep += "---:|"
+    header = "| tool | n prompts |" + "".join(f" {fw} avg |" for fw in frameworks)
+    sep = "|---|---:|" + "---:|" * len(frameworks)
     out.append(header)
     out.append(sep)
-    tool_keys = sorted(t for t in tool_groups if t != "(free-text)")
-    if "(free-text)" in tool_groups:
-        tool_keys.append("(free-text)")
-    for tool in tool_keys:
-        prompts_in_group = tool_groups[tool]
-        row = f"| `{tool}` | {len(prompts_in_group)} |"
-        for fw in frameworks_in_run:
-            values = []
-            for p in prompts_in_group:
-                v = runs[(run_id, "default")][fw].get(p, (None,))[0]
-                if v is not None:
-                    values.append(v)
-            if values:
-                row += f" {sum(values) / len(values):.3f} |"
-            else:
-                row += " – |"
-        out.append(row)
+    by_tool: dict[str | None, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    counts_by_tool: dict[str | None, int] = defaultdict(int)
+    for prompt, tool in prompts:
+        counts_by_tool[tool] += 1
+        for fw in frameworks:
+            row = latest.get(fw, {}).get(prompt)
+            t = row.get("elapsed_s") if row else None
+            if t is not None:
+                by_tool[tool][fw].append(t)
+    named = sorted([k for k in by_tool if k is not None])
+    for k in named + ([None] if None in by_tool else []):
+        cells = []
+        for fw in frameworks:
+            vals = by_tool[k].get(fw, [])
+            cells.append(f"{statistics.fmean(vals):.3f}" if vals else "—")
+        out.append(f"| {_tool_label(k)} | {counts_by_tool[k]} | " + " | ".join(cells) + " |")
     out.append("")
 
-    # ============================================================================
-    # SECTION 4: Per-framework historical trend (last N runs)
-    # ============================================================================
-    history_limit = 5
-    out.append(f"## 4. Per-framework historical trend (last {history_limit} runs)")
+    # ---- 4. Per-framework historical trend (last 5 runs) ----
+    out.append("## 4. Per-framework historical trend (last 5 runs)")
     out.append("")
-    out.append("Each framework's latencies across the most recent default-mode runs. Spot regressions and improvements over time.")
+    out.append("Each framework's latencies across the most recent runs. Spot regressions and "
+               "improvements over time.")
     out.append("")
-    for fw in frameworks_in_run:
-        fw_runs = default_runs_per_fw[fw][-history_limit:]
-        if not fw_runs:
-            continue
+    for fw in frameworks:
         out.append(f"### {fw}")
         out.append("")
-        run_labels = []
-        total_runs_for_fw = len(default_runs_per_fw[fw])
-        first_index_shown = total_runs_for_fw - len(fw_runs) + 1
-        for i, (rid, _) in enumerate(fw_runs):
-            run_labels.append(f"r{first_index_shown + i}")
-        header = "| prompt |"
-        sep = "|---|"
-        for label in run_labels:
-            header += f" {label} |"
-            sep += "---:|"
+        runs = fw_last5.get(fw, [])
+        if not runs:
+            out.append("_No history yet._")
+            out.append("")
+            continue
+        header = "| prompt |" + "".join(f" r{i+1} |" for i in range(len(runs)))
+        sep = "|---|" + "---:|" * len(runs)
         out.append(header)
         out.append(sep)
-        for prompt in all_prompts:
-            row = f"| {prompt[:46] + ('...' if len(prompt) > 46 else '')} |"
-            for _, totals_map in fw_runs:
-                v = totals_map.get(prompt)
-                row += f" {v:.3f} |" if v is not None else " – |"
-            out.append(row)
+        for prompt, _ in prompts:
+            cells = [_fmt(fw_hist[fw][prompt].get(rid)) for rid in runs]
+            out.append("| " + _short(prompt) + " | " + " | ".join(cells) + " |")
         out.append("")
-        out.append(f"Run IDs: " + ", ".join(f"`{label}`=`{rid}`" for label, (rid, _) in zip(run_labels, fw_runs)))
+        out.append("Run IDs: " +
+                   ", ".join(f"`r{i+1}`=`{rid}`" for i, rid in enumerate(runs)))
         out.append("")
 
-    # ============================================================================
-    # SECTION 5: Headlines
-    # ============================================================================
+    # ---- 5. Headlines ----
     out.append("## Headlines")
     out.append("")
-    fastest_fw = min(frameworks_in_run, key=lambda f: framework_totals[f])
-    fastest_avg = framework_totals[fastest_fw] / (framework_counts[fastest_fw] or 1)
-    slowest_fw = max(frameworks_in_run, key=lambda f: framework_totals[f])
-    slowest_avg = framework_totals[slowest_fw] / (framework_counts[slowest_fw] or 1)
-    out.append(f"- Latest fastest: **{fastest_fw}** ({framework_totals[fastest_fw]:.2f}s total, {fastest_avg:.3f}s avg).")
-    out.append(f"- Latest slowest: **{slowest_fw}** ({framework_totals[slowest_fw]:.2f}s total, {slowest_avg:.3f}s avg).")
-    out.append(f"- Latest gap: {slowest_avg - fastest_avg:.3f}s/prompt ({(slowest_avg / fastest_avg - 1) * 100:.1f}% slower).")
-    best_avg_per_fw = {
-        fw: best_totals[fw] / (best_counts[fw] or 1) for fw in frameworks_in_run
-    }
-    best_record_holder = min(best_avg_per_fw.keys(), key=lambda f: best_avg_per_fw[f])
-    out.append(f"- Best-record holder (lowest avg across personal bests): **{best_record_holder}** ({best_avg_per_fw[best_record_holder]:.3f}s avg).")
+    finalists = [(fw, latest_totals[fw], latest_counts[fw])
+                 for fw in frameworks if latest_counts[fw]]
+    if finalists:
+        fastest = min(finalists, key=lambda x: x[1] / x[2])
+        slowest = max(finalists, key=lambda x: x[1] / x[2])
+        out.append(f"- Latest fastest: **{fastest[0]}** "
+                   f"({fastest[1]:.2f}s total, {fastest[1] / fastest[2]:.3f}s avg).")
+        out.append(f"- Latest slowest: **{slowest[0]}** "
+                   f"({slowest[1]:.2f}s total, {slowest[1] / slowest[2]:.3f}s avg).")
+        if fastest[0] != slowest[0]:
+            fast_avg = fastest[1] / fastest[2]
+            slow_avg = slowest[1] / slowest[2]
+            gap_pct = (slow_avg - fast_avg) / fast_avg * 100 if fast_avg else 0
+            out.append(f"- Latest gap: {slow_avg - fast_avg:.3f}s/prompt "
+                       f"({gap_pct:.1f}% slower).")
+        # Best-of-bests winner
+        bob = [(fw, totals[fw] / counts[fw]) for fw in frameworks if counts[fw]]
+        if bob:
+            winner = min(bob, key=lambda x: x[1])
+            out.append(f"- Best-record holder (lowest avg across personal bests): "
+                       f"**{winner[0]}** ({winner[1]:.3f}s avg).")
+    else:
+        out.append("- No latest-run data captured.")
     out.append("")
-
-    # --- Side-by-side per-prompt totals -------------------------------------------
-    out.append("## Per-prompt total seconds")
-    out.append("")
-    header = "| prompt | tool |"
-    sep = "|---|---|"
-    for fw in frameworks_in_run:
-        header += f" {fw} |"
-        sep += "---:|"
-    out.append(header)
-    out.append(sep)
-    framework_totals = {fw: 0.0 for fw in frameworks_in_run}
-    framework_counts = {fw: 0 for fw in frameworks_in_run}
-    for prompt in all_prompts:
-        tool = expected.get(prompt) or "(free-text)"
-        row = f"| {prompt[:48] + ('...' if len(prompt) > 48 else '')} | `{tool}` |"
-        for fw in frameworks_in_run:
-            v = runs[(run_id, "default")][fw].get(prompt, (None,))[0]
-            if v is not None:
-                framework_totals[fw] += v
-                framework_counts[fw] += 1
-                row += f" {v:.3f} |"
-            else:
-                row += " – |"
-        out.append(row)
-    # totals
-    sum_row = "| **TOTAL** | |"
-    avg_row = "| **AVG / prompt** | |"
-    for fw in frameworks_in_run:
-        sum_row += f" **{framework_totals[fw]:.2f}** |"
-        n = framework_counts[fw] or 1
-        avg_row += f" **{framework_totals[fw] / n:.3f}** |"
-    out.append(sum_row)
-    out.append(avg_row)
-    out.append("")
-
-    # --- Per-tool average across frameworks ---------------------------------------
-    out.append("## Per-tool average seconds (across the latest run)")
-    out.append("")
-    out.append("Each row groups prompts by the tool they were expected to call. `(free-text)` means no tool — model answered directly.")
-    out.append("")
-    # group prompts by expected tool
-    tool_groups: dict[str, list[str]] = {}
-    for prompt in all_prompts:
-        t = expected.get(prompt) or "(free-text)"
-        tool_groups.setdefault(t, []).append(prompt)
-
-    header = "| tool | n prompts |"
-    sep = "|---|---:|"
-    for fw in frameworks_in_run:
-        header += f" {fw} avg |"
-        sep += "---:|"
-    out.append(header)
-    out.append(sep)
-    # Sort tools for stable output; put free-text at the end
-    tool_keys = sorted(t for t in tool_groups if t != "(free-text)")
-    if "(free-text)" in tool_groups:
-        tool_keys.append("(free-text)")
-    for tool in tool_keys:
-        prompts_in_group = tool_groups[tool]
-        row = f"| `{tool}` | {len(prompts_in_group)} |"
-        for fw in frameworks_in_run:
-            values = []
-            for p in prompts_in_group:
-                v = runs[(run_id, "default")][fw].get(p, (None,))[0]
-                if v is not None:
-                    values.append(v)
-            if values:
-                row += f" {sum(values)/len(values):.3f} |"
-            else:
-                row += " – |"
-        out.append(row)
-    out.append("")
-
-    # --- Summary ----------------------------------------------------------------
-    out.append("## Headlines")
-    out.append("")
-    # Find slowest tool overall
-    fastest_fw = min(frameworks_in_run, key=lambda f: framework_totals[f])
-    fastest_avg = framework_totals[fastest_fw] / (framework_counts[fastest_fw] or 1)
-    slowest_fw = max(frameworks_in_run, key=lambda f: framework_totals[f])
-    slowest_avg = framework_totals[slowest_fw] / (framework_counts[slowest_fw] or 1)
-    out.append(f"- Fastest framework on this run: **{fastest_fw}** ({framework_totals[fastest_fw]:.2f}s total, {fastest_avg:.3f}s avg).")
-    out.append(f"- Slowest: **{slowest_fw}** ({framework_totals[slowest_fw]:.2f}s total, {slowest_avg:.3f}s avg).")
-    out.append(f"- Gap: {slowest_avg - fastest_avg:.3f}s/prompt ({(slowest_avg/fastest_avg - 1) * 100:.1f}% slower).")
-    out.append("")
-    out.append("See `benchmark/BENCH_RESULTS.md` for the historical view and per-mode breakdown (default / mcp / think / memory / mcp+think+memory).")
-
-    bench_path = ROOT / "BENCHMARK.md"
-    bench_path.write_text("\n".join(out), encoding="utf-8")
-    print(f"wrote {bench_path.relative_to(ROOT)} (root-level table)")
+    return "\n".join(out) + "\n"
 
 
-def show_compare(mode_tags: list[str]) -> int:
-    """Cross-mode comparison table for the most recent run of each mode_tag.
-
-    Example:  python bench.py --compare default think memory
-    """
-    if not HISTORY_PATH.exists():
-        print("bench_history.jsonl not found.")
-        return 0
-
-    entries: list[dict[str, Any]] = []
-    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    # Most recent run_id per mode_tag
-    latest_run: dict[str, str] = {}
-    for entry in entries:
-        mt = entry.get("mode_tag")
-        rid = entry.get("run_id")
-        if not mt or not rid or mt not in mode_tags:
-            continue
-        if mt not in latest_run or rid > latest_run[mt]:
-            latest_run[mt] = rid
-
-    # Index by (prompt, framework, mode_tag) -> total / ttft
-    idx: dict[tuple[str, str, str], tuple[float | None, float | None]] = {}
-    prompts_in_order: list[str] = []
-    seen: set[str] = set()
-    for entry in entries:
-        mt = entry.get("mode_tag")
-        if mt not in mode_tags or entry.get("run_id") != latest_run.get(mt):
-            continue
-        prompt = entry.get("prompt") or ""
-        fw = entry.get("framework") or ""
-        if prompt and prompt not in seen:
-            prompts_in_order.append(prompt)
-            seen.add(prompt)
-        idx[(prompt, fw, mt)] = (entry.get("total"), entry.get("decision_ttft"))
-
-    # Header
-    cols = ["prompt".ljust(48)]
-    for mt in mode_tags:
-        for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
-            cols.append(f"{mt[:6]}_{fw[:3]}_t".rjust(12))
-    header = " ".join(cols)
-    print("\n" + header)
-    print("-" * len(header))
-
-    for prompt in prompts_in_order:
-        display = prompt[:45] + "..." if len(prompt) > 48 else prompt
-        row = [display.ljust(48)]
-        for mt in mode_tags:
-            for fw in ("python_custom_json", "python_hermes_xml", "python_pydantic_ai"):
-                total, _ = idx.get((prompt, fw, mt), (None, None))
-                row.append(("%.3f" % total if total is not None else "  -").rjust(12))
-        print(" ".join(row))
-
-    # Footer with the run_ids that fed this view
-    print("")
-    for mt in mode_tags:
-        if mt in latest_run:
-            print(f"  {mt}: {latest_run[mt]}")
-        else:
-            print(f"  {mt}: (no run found)")
-    return 0
-
-
-def show_history(limit_runs: int) -> int:
-    if not HISTORY_PATH.exists():
-        print("No bench_history.jsonl yet. Run `python bench.py` to create one.")
-        return 0
-
-    entries: list[dict[str, Any]] = []
-    with HISTORY_PATH.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    if not entries:
-        print("bench_history.jsonl is empty.")
-        return 0
-
-    # Group by prompt; within each prompt, group by framework and sort by run_id.
-    by_prompt: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for e in entries:
-        prompt = e.get("prompt") or ""
-        fw = e.get("framework") or "?"
-        by_prompt.setdefault(prompt, {}).setdefault(fw, []).append(e)
-
-    for prompt in sorted(by_prompt):
-        print(f"\n{prompt}")
-        for fw in sorted(by_prompt[prompt]):
-            runs = sorted(by_prompt[prompt][fw], key=lambda r: r.get("run_id") or "")
-            recent = runs[-limit_runs:]
-            for r in recent:
-                total = r.get("total")
-                ttft = r.get("decision_ttft")
-                total_s = f"{total:6.3f}s" if total is not None else "    -  "
-                ttft_s = f"{ttft:.3f}s" if ttft is not None else "  -"
-                marker = "  <- latest" if r is runs[-1] else ""
-                print(f"  {r.get('run_id','?')}  {fw:9s}  total {total_s}  ttft {ttft_s}{marker}")
-    return 0
-
-
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only",
-                        choices=["python_custom_json", "python_hermes_xml", "python_pydantic_ai", "python_jaeger"],
-                        help="Run just one framework.")
-    parser.add_argument("--with-jaeger", action="store_true",
-                        help="Include python_jaeger (subprocess + SOFT validation since its tool surface "
-                             "intentionally differs from the other three).")
-    parser.add_argument("--prompts", type=Path, help="Text file with one prompt per line.")
-    parser.add_argument("--skip-run", action="store_true", help="Don't run new prompts; only summarize existing logs.")
-    parser.add_argument("--history", action="store_true", help="Show recent bench-run history per prompt.")
-    parser.add_argument("--history-limit", type=int, default=5, help="How many recent runs to show in --history.")
-    parser.add_argument("--compare", nargs="+", default=None, help="Compare latest runs of these mode_tags (e.g. --compare default think memory).")
-    parser.add_argument("--write-results", action="store_true", help="Regenerate docs/BENCH_RESULTS.md from bench_history.jsonl and exit.")
-    parser.add_argument("--with-mcp", action="store_true", help="Enable MCP extension and add MCP-flavored prompts.")
-    parser.add_argument("--think", action="store_true", help="Enable background thinking extension during the run.")
-    parser.add_argument("--with-memory", action="store_true", help="Enable identity + session history + episodic log during the run.")
-    parser.add_argument("--mode-tag", default=None, help="Override mode tag in bench_history.jsonl.")
-    return parser.parse_args()
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--frameworks", default=IN_PROCESS_FRAMEWORKS_DEFAULT,
+                   help=f"Comma-separated in-process frameworks (default: {IN_PROCESS_FRAMEWORKS_DEFAULT}).")
+    p.add_argument("--skip-hermes-agent", action="store_true",
+                   help="Skip the HTTP-based python_hermes_agent run.")
+    p.add_argument("--runs", type=int, default=1,
+                   help="Repeat each prompt N times within each framework's worker run.")
+    p.add_argument("--prompts", type=Path, default=None,
+                   help="Custom prompt file (one per line; expected_tool left None).")
+    p.add_argument("--timeout", type=float, default=900,
+                   help="Per-framework subprocess timeout in seconds (default 900).")
+    p.add_argument("--no-history", action="store_true",
+                   help="Don't append to bench_history.jsonl.")
+    p.add_argument("--no-md", action="store_true",
+                   help="Don't regenerate BENCHMARK.md.")
+    p.add_argument("--md-out", type=Path, default=MD_OUT)
+    p.add_argument("--json-out", type=Path, default=JSON_OUT)
+    return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.history:
-        return show_history(args.history_limit)
-    if args.compare:
-        return show_compare(args.compare)
-    if args.write_results:
-        return write_results_doc()
 
-    prompts: list[tuple[str, str | None]] = DEFAULT_PROMPTS
     if args.prompts:
-        # User-supplied prompts: no expected_tool — skip validation per prompt.
-        prompts = [
-            (line.strip(), _SKIP_VALIDATION)
+        prompts: list[tuple[str, str | None]] = [
+            (line.strip(), None)
             for line in args.prompts.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-    elif args.with_mcp:
-        prompts = DEFAULT_PROMPTS + MCP_PROMPTS
-
-    if args.only:
-        chosen = [args.only]
     else:
-        chosen = ["python_custom_json", "python_hermes_xml", "python_pydantic_ai"]
-        if args.with_jaeger:
-            chosen.append("python_jaeger")
+        prompts = DEFAULT_PROMPTS
+    if not prompts:
+        print("no prompts to run", file=sys.stderr)
+        return 2
 
-    # Derive a mode tag for the history entries.
-    if args.mode_tag:
-        mode_tag = args.mode_tag
-    else:
-        parts: list[str] = []
-        if args.with_mcp:
-            parts.append("mcp")
-        if args.think:
-            parts.append("think")
-        if args.with_memory:
-            parts.append("memory")
-        mode_tag = "+".join(parts) if parts else "default"
+    inprocess = [f.strip() for f in args.frameworks.split(",") if f.strip()]
+    frameworks = list(inprocess)
+    if not args.skip_hermes_agent:
+        frameworks.append("python_hermes_agent")
 
-    run_id: str | None = None
-    if not args.skip_run:
-        run_id = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        os.environ["BENCH_RUN_ID"] = run_id
-        if args.with_mcp:
-            os.environ["BENCH_WITH_MCP"] = "1"
-        else:
-            os.environ.pop("BENCH_WITH_MCP", None)
-        if args.think:
-            os.environ["BENCH_WITH_THINKING"] = "1"
-        else:
-            os.environ.pop("BENCH_WITH_THINKING", None)
-        if args.with_memory:
-            os.environ["BENCH_WITH_MEMORY"] = "1"
-        else:
-            os.environ.pop("BENCH_WITH_MEMORY", None)
-        print(f"\n[bench] run_id = {run_id}  mode = {mode_tag}", flush=True)
-        for fw in chosen:
-            run_framework(fw, prompts)
-        append_history(run_id, chosen, prompts, mode_tag)
-        print(f"\n[bench] appended {len(prompts) * len(chosen)} entries to {HISTORY_PATH.name} (mode_tag={mode_tag})", flush=True)
+    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    print(f"Bench: {len(prompts)} prompt(s) × {args.runs} run(s) "
+          f"across {len(frameworks)} framework(s)")
+    print(f"  run_id: {run_id}")
+    print(f"  frameworks: {', '.join(frameworks)}")
 
-    print_comparison(prompts, chosen, run_id)
+    # Repeat the prompt list `runs` times for each framework
+    flat_prompts = [p for _ in range(args.runs) for p, _ in prompts]
+    expected_canonical = {p: t for p, t in prompts}
+
+    raw_by_fw: dict[str, list[dict[str, Any]]] = {}
+    t0 = time.perf_counter()
+
+    # In-process frameworks via bench_worker.py
+    for fw in inprocess:
+        rows = run_via_worker(fw, flat_prompts, timeout_s=args.timeout)
+        for r in rows:
+            canon = expected_canonical.get(r["prompt"])
+            r["expected_tool"] = expected_for(fw, canon)
+            r["called_tool"] = infer_tool(r.get("tool_activity") or [])
+        raw_by_fw[fw] = rows
+
+    # python_hermes_agent over HTTP
+    if not args.skip_hermes_agent:
+        log_path = PROJECT_ROOT / "logs" / "bench_llm_server.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        server = None
+        try:
+            server = start_llama_server(log_path)
+            rows = run_hermes_agent(flat_prompts)
+            for r in rows:
+                canon = expected_canonical.get(r["prompt"])
+                r["expected_tool"] = canon
+                r["called_tool"] = None  # hermes-agent CLI doesn't surface tool names
+            raw_by_fw["python_hermes_agent"] = rows
+        finally:
+            stop_llama_server(server)
+
+    wall = time.perf_counter() - t0
+
+    # ---- Collapse repeats: latest[fw][prompt] = aggregated row ----
+    latest: dict[str, dict[str, dict[str, Any]]] = {}
+    for fw, rows in raw_by_fw.items():
+        by_prompt: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for r in rows:
+            by_prompt[r["prompt"]].append(r)
+        merged: dict[str, dict[str, Any]] = {}
+        for p, rs in by_prompt.items():
+            ok = [r for r in rs if not r.get("error")]
+            if not ok:
+                merged[p] = rs[-1]
+                continue
+            mean = statistics.fmean(r["elapsed_s"] for r in ok)
+            row = dict(ok[-1])
+            row["elapsed_s"] = mean
+            row["n_runs"] = len(ok)
+            merged[p] = row
+        latest[fw] = merged
+
+    # ---- Write JSON ----
+    args.json_out.write_text(
+        json.dumps({
+            "run_id": run_id,
+            "wall_clock_s": round(wall, 3),
+            "frameworks": frameworks,
+            "prompts": [{"prompt": p, "expected_tool": t} for p, t in prompts],
+            "runs_per_prompt": args.runs,
+            "results": raw_by_fw,
+        }, indent=2, default=str),
+        encoding="utf-8",
+    )
+    print(f"\nWrote {args.json_out.relative_to(ROOT)} ({wall:.1f}s wall).")
+
+    # ---- Append history ----
+    if not args.no_history:
+        append_history(run_id, raw_by_fw)
+        total_rows = sum(len(rs) for rs in raw_by_fw.values())
+        print(f"Appended {total_rows} row(s) to {HISTORY_PATH.name}.")
+
+    # ---- Render markdown ----
+    if not args.no_md:
+        history = load_history()
+        md = render_markdown(
+            run_id=run_id,
+            prompts=prompts,
+            frameworks=frameworks,
+            latest=latest,
+            history=history,
+        )
+        args.md_out.write_text(md, encoding="utf-8")
+        print(f"Wrote {args.md_out.relative_to(ROOT)}.")
+        # Print just the headlines to stdout — the full table is in the file.
+        for line in md.splitlines():
+            if line.startswith("- ") or line.startswith("## Headlines"):
+                print(line)
+
     return 0
 
 
