@@ -567,7 +567,7 @@ def _register_builtins(agent: Agent[None, str], client: Any) -> None:
         if not channel_clean or not recipient_clean or not text_clean:
             return {"sent": False, "error": "channel, recipient, and text are all required"}
         try:
-            from .plugins.messaging import get_bridge, list_bridges
+            from .plugins import get_bridge, list_bridges
         except Exception as exc:
             return {"sent": False, "error": f"messaging plugin not importable: {exc}"}
         bridge = get_bridge(channel_clean)
@@ -688,8 +688,8 @@ def _build_mcp_tools(specs: list[Any]) -> list[Any]:
 
         def _make_caller(qualified_name: str):
             def _call(**kwargs: Any) -> dict[str, Any]:
-                from .plugins import mcp_bridge
-                return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
+                from .plugins.mcp import client as mcp_client
+                return mcp_client.call_mcp_tool(qualified_name, kwargs)
             _call.__name__ = qualified_name.replace(":", "_").replace("/", "_")
             return _call
 
@@ -946,7 +946,7 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
 
 
 # ---------------------------------------------------------------------------
-# Bridging API — for plugins/messaging/gateway.py and other entry points
+# Bridging API — for plugins/messaging_gateway.py and other entry points
 # that need a structured-dict return rather than print-to-stdout.
 # ---------------------------------------------------------------------------
 def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:
@@ -1039,8 +1039,8 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_mcp:
         try:
-            from .plugins import mcp_bridge
-            registry = mcp_bridge.init_from_config()
+            from .plugins.mcp import client as mcp_client
+            registry = mcp_client.init_from_config()
             specs = registry.list_tools()
             _pipeline["mcp_specs"] = specs
             if specs:
@@ -1050,13 +1050,19 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_thinking:
         try:
-            from .plugins import thinking_runner
+            from .core.runners import thinking_runner
             lock = _pipeline.get("llm_lock") or threading.Lock()
             _pipeline["llm_lock"] = lock
+            # Per-instance log path keeps thinking output out of the framework
+            # source tree (matches the vocabulary contract — runners log into
+            # <instance>/logs/, not into core/).
+            layout = _pipeline.get("layout")
+            log_path = (layout.logs_dir / "thinking.jsonl") if layout is not None else None
             _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
-                client, "python_jaeger", lock, _pipeline["system_prompt"]
+                client, "python_jaeger", lock, _pipeline["system_prompt"],
+                log_path=log_path,
             )
-            print("[jaeger] background thinking enabled — see plugins/thinking.jsonl.", flush=True)
+            print("[jaeger] background thinking enabled — see <instance>/logs/thinking.jsonl.", flush=True)
         except Exception as exc:
             print(f"[jaeger] --think failed: {exc}", file=sys.stderr, flush=True)
 
@@ -1144,6 +1150,8 @@ Commands (type at the You: prompt):
   /tools [on|off]    toggle the tool-activity lines under each reply
   /setup             re-run the setup wizard (backs up the current instance)
   /skills            list registered skills
+  /instances         list all instances (read-only; mutate via CLI flags)
+  /whoami            show the active instance + identity
   /multi             enter multi-line mode (finish with a blank line)
   /quit              exit (also: exit, quit, Ctrl-D)
 
@@ -1215,6 +1223,24 @@ def _handle_slash(cmd: str, client: Any | None) -> bool:
             print(f"  setup complete — restart Jaeger to pick up changes at {new_layout.root}.")
         except Exception as exc:
             print(f"  /setup failed: {exc}")
+        return True
+    if head in {"/instances", "/list-instances"}:
+        # Read-only — mutation ops live on the CLI (--create/delete/clear)
+        # and require restart since we'd otherwise have to tear down the
+        # already-loaded LLM + instance lock.
+        _cli_list_instances()
+        return True
+    if head == "/whoami":
+        layout: InstanceLayout = _pipeline["layout"]
+        cfg = _pipeline.get("config")
+        print(f"  instance: {cfg.instance_name if cfg else '?'}")
+        print(f"  path:     {layout.root}")
+        try:
+            from .core.schemas import Identity, load_yaml
+            ident = load_yaml(layout.identity_path, Identity)
+            print(f"  identity: {ident.name!r} — {ident.role}")
+        except Exception as exc:
+            print(f"  identity: (unreadable: {exc})")
         return True
     print(f"  unknown command: {head} (try /help)")
     return True
@@ -1419,6 +1445,191 @@ def _cli_migrate(layout: InstanceLayout) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Instance management — admin commands. All exit after running and never
+# enter the chat loop. Mutating ops (delete / clear) prompt for confirmation
+# unless --force is passed (or stdin is not a TTY, where confirmation is
+# auto-yes so scripts can run them in CI).
+# ---------------------------------------------------------------------------
+def _instance_root() -> "Path":
+    """Parent directory containing all instances. Same resolution rules as
+    a single instance, just without the trailing instance-name component."""
+    # resolve_instance_dir("__probe__") is built deterministically from the
+    # same parent. Strip the leaf to get the root.
+    return resolve_instance_dir("__probe__").parent
+
+
+def _list_instances() -> list[tuple[str, "Path", bool]]:
+    """Return [(name, path, has_manifest), ...] for every directory under
+    the instance root. has_manifest is True when the dir looks like a
+    valid Jaeger instance (manifest.json present)."""
+    root = _instance_root()
+    if not root.exists():
+        return []
+    instances = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        has_manifest = (child / "manifest.json").exists()
+        instances.append((child.name, child, has_manifest))
+    return instances
+
+
+def _cli_list_instances() -> int:
+    """Print all instances under the root with their identity + status."""
+    instances = _list_instances()
+    root = _instance_root()
+    print(f"Instances under {root}:")
+    if not instances:
+        print("  (none yet — run --setup or --create-instance to create one)")
+        return 0
+    current = default_instance_name()
+    for name, path, has_manifest in instances:
+        marker = " *" if name == current else "  "
+        if has_manifest:
+            # Try to read the instance's identity for a one-line summary.
+            try:
+                from .core.schemas import Identity, load_yaml
+                identity = load_yaml(path / "identity.yaml", Identity)
+                summary = f"{identity.name!r} — {identity.role}"
+            except Exception:
+                summary = "(unreadable identity.yaml)"
+        else:
+            summary = "(stub: no manifest.json — partial setup?)"
+        print(f"{marker} {name:<24} {summary}")
+    print(f"\n* = current (JAEGER_INSTANCE_NAME={current!r})")
+    return 0
+
+
+def _cli_create_instance(name: str, *, force: bool = False) -> int:
+    """Non-interactively create a new instance with default identity + config.
+    Refuses if the target dir already exists (use --force to overwrite)."""
+    layout = InstanceLayout(root=resolve_instance_dir(name))
+    if layout.root.exists() and any(layout.root.iterdir()):
+        if not force:
+            print(f"[jaeger] instance {name!r} already exists at {layout.root} "
+                  f"— use --force to overwrite, or pick a different name.",
+                  file=sys.stderr, flush=True)
+            return 2
+        # Overwrite path
+        import shutil
+        shutil.rmtree(layout.root, ignore_errors=True)
+
+    from .core.schemas import (
+        Config, DisplayConfig, Identity, Manifest, ModelConfig, SkillsConfig,
+        dump_json, dump_yaml,
+    )
+    from model_resolver import resolve_model_path
+
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    dump_yaml(layout.identity_path, Identity(
+        name=name.capitalize(),
+        role="local AI assistant",
+        personality=(
+            "Concise and direct. Match tool calls to user intent — never "
+            "free-text when a tool exists for the request."
+        ),
+    ))
+    dump_yaml(layout.config_path, Config(
+        instance_name=name,
+        model=ModelConfig(model_path=resolve_model_path()),
+        display=DisplayConfig(show_help_on_start=False),
+        skills=SkillsConfig(run_smoke_tests=True),
+    ))
+    dump_json(layout.manifest_path, Manifest(instance_name=name))
+    print(f"[jaeger] created instance {name!r} at {layout.root}")
+    print(f"         identity.yaml + config.yaml + manifest.json populated with defaults.")
+    print(f"         edit identity.yaml / config.yaml to customize, then launch with:")
+    print(f"           python -m python_jaeger --instance {name}")
+    return 0
+
+
+def _cli_delete_instance(name: str, *, force: bool = False) -> int:
+    """Remove an entire instance directory. PROMPTS for confirmation unless
+    --force. Refuses to delete the currently-active instance (per
+    JAEGER_INSTANCE_NAME) without --force as a sanity check."""
+    layout = InstanceLayout(root=resolve_instance_dir(name))
+    if not layout.root.exists():
+        print(f"[jaeger] no instance {name!r} at {layout.root} — nothing to delete.")
+        return 1
+
+    if name == default_instance_name() and not force:
+        print(f"[jaeger] {name!r} is the active instance (per JAEGER_INSTANCE_NAME). "
+              f"Pass --force to delete it anyway.", file=sys.stderr, flush=True)
+        return 2
+
+    if not force:
+        if sys.stdin.isatty():
+            confirm = input(
+                f"[jaeger] delete instance {name!r} at {layout.root}? "
+                f"This is irreversible. Type the instance name to confirm: "
+            )
+            if confirm.strip() != name:
+                print("[jaeger] aborted (name didn't match).")
+                return 1
+        # If stdin isn't a TTY (piped/scripted), require --force explicitly.
+        else:
+            print(f"[jaeger] non-interactive delete refused; pass --force.", file=sys.stderr)
+            return 2
+
+    import shutil
+    shutil.rmtree(layout.root)
+    print(f"[jaeger] deleted instance {name!r}.")
+    return 0
+
+
+def _cli_clear_instance(name: str, *, force: bool = False) -> int:
+    """Reset memory + logs but keep identity / config / manifest / credentials /
+    skills. Useful for 'start a clean conversation, don't blow away your setup.'
+    """
+    layout = InstanceLayout(root=resolve_instance_dir(name))
+    if not layout.root.exists():
+        print(f"[jaeger] no instance {name!r} at {layout.root} — nothing to clear.")
+        return 1
+
+    if not force:
+        if sys.stdin.isatty():
+            confirm = input(
+                f"[jaeger] clear memory + logs for instance {name!r}? "
+                f"(identity / config / credentials / skills are preserved) [y/N]: "
+            )
+            if confirm.strip().lower() not in ("y", "yes"):
+                print("[jaeger] aborted.")
+                return 1
+        else:
+            print(f"[jaeger] non-interactive clear refused; pass --force.", file=sys.stderr)
+            return 2
+
+    import shutil
+    cleared = []
+    # Memory: wipe everything (facts.json, episodic.jsonl, embeddings.npz, …)
+    if layout.memory_dir.exists():
+        for entry in layout.memory_dir.iterdir():
+            try:
+                if entry.is_file():
+                    entry.unlink()
+                else:
+                    shutil.rmtree(entry, ignore_errors=True)
+            except Exception as exc:
+                print(f"[jaeger] couldn't clear {entry}: {exc}", file=sys.stderr)
+        cleared.append("memory/")
+    # Logs: drop everything (latency, audit, thinking)
+    if layout.logs_dir.exists():
+        for entry in layout.logs_dir.iterdir():
+            try:
+                if entry.is_file():
+                    entry.unlink()
+                else:
+                    shutil.rmtree(entry, ignore_errors=True)
+            except Exception as exc:
+                print(f"[jaeger] couldn't clear {entry}: {exc}", file=sys.stderr)
+        cleared.append("logs/")
+    print(f"[jaeger] cleared {name!r}: {', '.join(cleared) or '(nothing to clear)'}")
+    print(f"         preserved: identity.yaml, config.yaml, manifest.json, credentials/, skills/")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI argparse + main
 # ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
@@ -1440,6 +1651,16 @@ def parse_args() -> argparse.Namespace:
                    help="Delete a stored credential by name and exit.")
     p.add_argument("--migrate", action="store_true",
                    help="Run any pending core migrations against this instance and exit.")
+    p.add_argument("--list-instances", action="store_true",
+                   help="List every instance under the root and exit.")
+    p.add_argument("--create-instance", metavar="NAME",
+                   help="Non-interactively create a new instance with default identity + config, then exit.")
+    p.add_argument("--delete-instance", metavar="NAME",
+                   help="Delete an instance directory and exit. Prompts for confirmation unless --force.")
+    p.add_argument("--clear-instance", metavar="NAME",
+                   help="Clear memory + logs for an instance (preserves identity / config / credentials / skills). Prompts unless --force.")
+    p.add_argument("--force", action="store_true",
+                   help="Skip confirmation prompts on destructive commands (delete-instance / clear-instance / create-instance overwrite).")
     p.add_argument("--with-memory", action="store_true",
                    help=("Carry conversation history across turns (load last 5 "
                          "episodic turns + accumulate within session). Auto-on "
@@ -1451,14 +1672,40 @@ def parse_args() -> argparse.Namespace:
                    help=("Run a background chain-of-thought call after each "
                          "user turn. Logs to plugins/thinking.jsonl. Shares the "
                          "main LLM lock so it never decodes concurrently."))
+    p.add_argument("--voice", action="store_true",
+                   help=("Launch the voice loop daemon instead of CLI chat. "
+                         "All flags after --voice are forwarded to voice_loop "
+                         "(--stt-mode, --barge-in, --no-aec, --require-wake-word, "
+                         "--no-chimes, --fast-model, --accurate-model). "
+                         "See `python -m python_jaeger --voice --help` for the "
+                         "voice flag surface."))
     return p.parse_args()
 
 
 def main() -> int:
+    # If --voice is present, peel it off and delegate to the voice_loop
+    # daemon. Voice_loop has its own argparse for STT mode, barge-in, AEC,
+    # wake-word, chimes, model names, etc. — every flag the user types
+    # after --voice flows through unchanged.
+    if "--voice" in sys.argv[1:]:
+        sys.argv.remove("--voice")
+        from .plugins.voice_loop import main as voice_main
+        return voice_main()
     args = parse_args()
     instance_name = args.instance or default_instance_name()
     root = resolve_instance_dir(instance_name)
     layout = InstanceLayout(root=root)
+
+    # Instance management commands — run BEFORE the wizard / manifest check,
+    # since they're admin ops that don't require an active instance.
+    if args.list_instances:
+        return _cli_list_instances()
+    if args.create_instance:
+        return _cli_create_instance(args.create_instance, force=args.force)
+    if args.delete_instance:
+        return _cli_delete_instance(args.delete_instance, force=args.force)
+    if args.clear_instance:
+        return _cli_clear_instance(args.clear_instance, force=args.force)
 
     # Self-test runs without identity/config/manifest — it only exercises
     # the framework code paths (sandbox, memory, skill loader, credentials,

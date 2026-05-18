@@ -1,0 +1,11 @@
+name: telegram
+version: 1
+description: |
+  Bidirectional Telegram adapter. Listens for messages from allowlisted
+  chats; lets the agent push proactive messages via
+  send_message("telegram", chat_id, text).
+requires:
+  libraries: [python-telegram-bot]
+  env: [TELEGRAM_BOT_TOKEN]
+  env_optional: [TELEGRAM_ALLOWED_CHAT_IDS]
+registers_bridges: [telegram]

@@ -26,13 +26,8 @@ from typing import Any, Callable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_MODEL_PATH = Path(
-    os.environ.get(
-        "HERMES_LLM_MODEL",
-        "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-        "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf",
-    )
-)
+from model_resolver import resolve_model_path
+DEFAULT_MODEL_PATH = resolve_model_path()
 
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
 
@@ -80,12 +75,14 @@ def check_disk_free() -> tuple[str, str]:
 
 def check_deps() -> tuple[str, str]:
     """Core deps (FAIL if missing) + optional deps (just note them)."""
-    required = ["llama_cpp", "pydantic_ai", "kokoro", "sounddevice", "webrtcvad", "pyaec", "scipy", "numpy"]
+    required = ["llama_cpp", "pydantic_ai", "kokoro", "sounddevice", "webrtcvad", "scipy", "numpy"]
     optional = {
         "sentence_transformers": "semantic memory search",
         "transformers": "look_at (vision)",
         "diffusers": "generate_image",
         "discord": "Discord messaging bridge",
+        "pywhispercpp": "whisper_stt plugin (voice loop)",
+        "speexdsp": "AEC for barge-in (passthrough without it)",
     }
     missing: list[str] = []
     for mod in required:

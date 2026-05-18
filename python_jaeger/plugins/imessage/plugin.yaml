@@ -1,0 +1,12 @@
+name: imessage
+version: 1
+description: |
+  Bidirectional iMessage adapter for macOS. Polls chat.db for incoming
+  messages from allowlisted handles; sends via AppleScript.
+requires:
+  libraries: []
+  env: [IMESSAGE_ALLOWED_HANDLES]
+  hardware: []
+  platform: [darwin]
+  notes: Needs Full Disk Access granted to the running Python process.
+registers_bridges: [imessage]

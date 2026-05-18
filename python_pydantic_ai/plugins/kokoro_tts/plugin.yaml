@@ -1,0 +1,17 @@
+name: kokoro_tts
+version: 1
+description: |
+  Kokoro KPipeline text-to-speech, played through the default sounddevice
+  output. Registers the speak()/speak_file()/warm_kokoro() agent tools
+  (via the thin shim in core/tools/speak.py).
+requires:
+  libraries: [kokoro, sounddevice, numpy]
+  models:
+    - name: kokoro-82m
+      source: hexgrad/Kokoro-82M
+      auto_download: true
+  hardware: [speaker]
+provides:
+  tools: [speak, speak_file, warm_kokoro]
+capabilities: [ssml]
+entry: node.py

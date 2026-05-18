@@ -1,8 +1,8 @@
 # python_jaeger
 
-**Self-improving local agent with multi-instance isolation, versioned skill authoring, sandboxed file ops, credential store, and a plugin system for MCP / messaging / background thinking.**
+**Self-improving local agent with multi-instance isolation, versioned skill authoring, sandboxed file ops, credential store, and a plugin system for MCP / messaging / voice / background thinking.**
 
-Jaeger is the flagship framework in this repo. It started as a fork of [`python_pydantic_ai`](PYTHON_PYDANTIC_AI.md) and inherited that framework's routing core (`agent.iter()` + skip-final intercept), then added the production guarantees needed to actually ship an agent: instance isolation, skill versioning with smoke-test gating, credential isolation, git auto-commit per agent-authored write, manifest + migration runner, and a plugin system mirroring pydantic_ai's.
+Jaeger is the flagship framework in this repo. It started as a fork of [`python_pydantic_ai`](PYTHON_PYDANTIC_AI.md) and inherited that framework's routing core (`agent.iter()` + skip-final intercept), then added the production guarantees needed to actually ship an agent: instance isolation, skill versioning with smoke-test gating, credential isolation, git auto-commit per agent-authored write, manifest + migration runner, full voice loop with optional AEC-based barge-in, and a plugin system mirroring pydantic_ai's.
 
 **Benchmark status:** 23/23 on the routing bench, tied with `python_pydantic_ai`.
 
@@ -19,8 +19,18 @@ python -m python_jaeger --instance work
 python -m python_jaeger "what time is it"
 python -m python_jaeger --with-mcp "list the files on my Desktop"
 
-# First-time setup wizard (writes identity.yaml + config.yaml + manifest.json)
-python -m python_jaeger --setup
+# Voice loop — STT → agent → TTS, with optional wake-word and barge-in
+python -m python_jaeger --voice
+python -m python_jaeger --voice --require-wake-word --barge-in
+python -m python_jaeger --voice --stt-mode continuous
+python -m python_jaeger --voice --help                  # see all voice flags
+
+# Instance management (admin commands; exit without launching chat)
+python -m python_jaeger --list-instances
+python -m python_jaeger --create-instance work
+python -m python_jaeger --clear-instance default        # wipes memory + logs only
+python -m python_jaeger --delete-instance temp          # nukes the dir
+python -m python_jaeger --setup                         # interactive wizard (re)setup
 
 # Smoke test (no LLM load)
 python -m python_jaeger --self-test
@@ -31,18 +41,24 @@ python -m python_jaeger --list-credentials
 python -m python_jaeger --delete-credential OPENWEATHER_API_KEY
 
 # Messaging gateway (Discord + Telegram + iMessage)
-python -m python_jaeger.plugins.messaging.gateway
+python -m python_jaeger.plugins.messaging_gateway
 ```
 
 | Flag | Effect |
 |---|---|
 | `--instance NAME` | Pick which instance dir to load (default: `JAEGER_INSTANCE_NAME` or `default`) |
+| `--voice` | Launch the voice loop daemon instead of CLI chat (subsequent flags pass through to voice_loop) |
 | `--with-memory` | Carry conversation across turns (auto-on in interactive) |
-| `--with-mcp` | Connect to MCP servers from `plugins/mcp_config.json` |
+| `--with-mcp` | Connect to MCP servers from `plugins/mcp/mcp_config.json` |
 | `--think` | Run a background chain-of-thought after each turn |
 | `--no-warmup` | Skip the cold-cache prewarm at startup |
 | `--no-cron` | Don't start the cron runner |
 | `--migrate` | Apply pending core migrations to the instance |
+| `--list-instances` | Print every instance under the root and exit |
+| `--create-instance NAME` | Non-interactively create with default identity / config |
+| `--clear-instance NAME` | Wipe memory + logs but keep identity / config / credentials / skills |
+| `--delete-instance NAME` | Remove the entire instance dir (prompts unless `--force`) |
+| `--force` | Skip confirmation on mutating instance commands |
 
 ---
 
@@ -69,6 +85,56 @@ Every jaeger run is bound to one instance directory. Default is `python_jaeger/i
 ```
 
 The instance dir is **not** committed to the framework repo. The pre-seeded `python_jaeger/instance/default/` is included so you can run jaeger immediately without going through the wizard.
+
+---
+
+## Instance management
+
+Multiple instances are supported out of the box. Each is identified by name; the active one comes from `JAEGER_INSTANCE_NAME` (env var) or defaults to `default`.
+
+### CLI commands (admin operations — never enter the chat loop)
+
+```bash
+# List every instance under the root, marking the active one with *
+python -m python_jaeger --list-instances
+
+# Create a fresh instance non-interactively (defaults — edit identity.yaml after)
+python -m python_jaeger --create-instance work
+
+# Clear an instance: wipe memory + logs, KEEP identity / config / credentials / skills
+python -m python_jaeger --clear-instance work          # prompts y/N
+python -m python_jaeger --clear-instance work --force  # skip prompt
+
+# Delete an instance entirely. Prompts for confirmation (type the name to confirm).
+# Refuses to delete the currently-active instance without --force.
+python -m python_jaeger --delete-instance temp
+python -m python_jaeger --delete-instance temp --force
+```
+
+The clear / delete commands refuse non-interactive runs (piped stdin) unless `--force` is passed — protects against accidental destruction from shell scripts.
+
+### In-chat slash commands (read-only)
+
+While in the chat loop, mutation requires a restart (the instance dir is held under an exclusive `fcntl` lock). Read-only inspection works:
+
+```
+/instances        list every instance, mark the active one
+/whoami           show current instance + identity (name / role)
+```
+
+To switch instances, exit the chat (`/quit`) and re-launch with `--instance NAME`.
+
+### Trust zones (from the v2 contract)
+
+| Zone | Path | Who can write |
+|---|---|---|
+| Framework skills | `python_jaeger/skills/` | framework developer only — read-only at runtime |
+| Instance skills | `<instance>/skills/` | the agent (via `file_write`); append-only versioning |
+| Instance config | `<instance>/{identity,config,manifest}.yaml/json` | the human (wizard or hand-edit) — read-only to the agent |
+| Instance credentials | `<instance>/credentials/` | the human (via `--set-credential`) — agent reads via `get_credential`, never directly |
+| Plugins | `python_jaeger/plugins/` | framework developer only — read-only at runtime |
+
+The agent CANNOT delete or overwrite a prior skill version even in the instance zone; the loader treats each `<name>_v<N>/` folder as immutable once smoke-tested. To deprecate, the agent writes a new `<name>_v<N+1>/` with the changed behavior.
 
 ---
 
@@ -165,39 +231,128 @@ When `--with-memory` is on (auto-enabled in interactive chat, set explicitly by 
 
 ## Plugin system
 
-Plugins live in `python_jaeger/plugins/`. Each is opt-in.
+Plugins live in `python_jaeger/plugins/` — each is a drop-in external
+integration with its own `plugin.yaml` manifest and smoke test. See
+[VOCABULARY.md](VOCABULARY.md) for the strict definition.
 
-### `plugins/mcp_bridge.py` — Model Context Protocol
+### `plugins/mcp/` — Model Context Protocol
 
-Connects to MCP servers from `plugins/mcp_config.json`. Each server's advertised JSON Schema becomes a pydantic-ai `Tool` automatically — no code change to add a new server.
+Connects to MCP server processes listed in `plugins/mcp/mcp_config.json`.
+Each server's advertised JSON Schema becomes a pydantic-ai `Tool`
+dynamically — no code change to add a new server.
 
 ```bash
 python -m python_jaeger --with-mcp  # or JAEGER_WITH_MCP=1
 ```
 
-Tools register dynamically; `_get_agent` rebuilds on first call after MCP comes online.
+Tools register on first agent build after MCP comes online; the `_get_agent`
+cache rebuilds when the MCP fingerprint changes.
 
-### `plugins/thinking_runner.py` — Background CoT
+### `plugins/discord/`, `plugins/telegram/`, `plugins/imessage/` — messaging
 
-Fires a "think through what just happened" call after each user turn on a single-worker pool, sharing the main LLM lock so it never decodes concurrently. Logs to `plugins/thinking.jsonl`.
+Per-integration plugins; each registers a bridge in the shared registry
+(`plugins/__init__.py`) so the `send_message(channel, recipient, text)`
+agent tool can push proactive messages.
 
-```bash
-python -m python_jaeger --think  # or JAEGER_WITH_THINKING=1
-```
+| Plugin | Activates when | Needs |
+|---|---|---|
+| `discord/` | `DISCORD_BOT_TOKEN` is set | `discord.py` |
+| `telegram/` | `TELEGRAM_BOT_TOKEN` is set | `python-telegram-bot` |
+| `imessage/` | `IMESSAGE_ALLOWED_HANDLES` set + macOS + Full Disk Access | — |
 
-### `plugins/messaging/` — Multi-channel gateway
-
-`gateway.py` loads jaeger once and starts every available bridge based on env vars:
-
-- `DISCORD_BOT_TOKEN` → Discord adapter
-- `TELEGRAM_BOT_TOKEN` → Telegram adapter
-- `IMESSAGE_ALLOWED_HANDLES` → iMessage adapter (macOS, needs Full Disk Access)
-
-All bridges register in a shared registry. The `send_message(channel, recipient, text)` tool pushes proactive messages to any live channel — useful for `schedule_prompt("0 7 * * *", "text Alice the weather")` workflows.
+Run all three behind one daemon via the gateway:
 
 ```bash
-python -m python_jaeger.plugins.messaging.gateway
+python -m python_jaeger.plugins.messaging_gateway
 ```
+
+The gateway daemon (`plugins/messaging_gateway.py`) loads jaeger once and
+starts every plugin with valid credentials. It's NOT a plugin itself —
+it's the orchestrator daemon. Each bridge runs in its own thread and
+shares the LLM lock so two channels can't decode concurrently.
+
+### `plugins/kokoro_tts/` — text-to-speech
+
+Synthesizes the agent's reply via the Kokoro KPipeline and plays through
+the default audio output. Two playback modes:
+
+- `speak(text)` — synchronous; blocks until playback finishes. Used by
+  the `speak`/`speak_file` agent tools.
+- `play_async(text)` — chunked, non-blocking. Starts playing as the first
+  Kokoro chunk renders so the user can interrupt with barge-in. Used by
+  the voice loop in `--barge-in` mode.
+
+Both apply `clean_for_tts()` to the input — strips markdown so Kokoro
+doesn't read asterisks / code fences / link syntax literally.
+
+### `plugins/whisper_stt/` — speech-to-text
+
+Microphone capture + transcription. Two algorithms with the same public
+API (`start`, `stop`, `next_phrase`, `set_paused`, `open_followup`,
+`set_on_speech_detected`, `drain_pending`):
+
+- `two_pass` (default) — VAD-segmented; fast base.en model gates the
+  accurate medium.en model. Robust to noisy backgrounds.
+- `continuous` — energy-segmented with rolling re-transcription. Lower
+  commit latency, lighter memory footprint.
+
+Both support wake-word gating (`require_wake_word=True`, default phrases
+include `hey jaeger / yeager / yager / jager` to cover Whisper mishears),
+follow-up windows, and optional AEC integration.
+
+### `plugins/voice_loop.py` — voice daemon
+
+Wires STT → agent → TTS into one synchronous loop with optional barge-in.
+Not a plugin itself (no external integration) — it's the orchestrator
+that owns the audio devices. Same role as `messaging_gateway.py`.
+
+```bash
+python -m python_jaeger --voice                                       # CLI entry
+python -m python_jaeger --voice --require-wake-word --barge-in        # robot mode
+python -m python_jaeger --voice --stt-mode continuous --no-aec        # tuned
+```
+
+Voice-loop flags (forwarded after `--voice`):
+
+| Flag | Effect |
+|---|---|
+| `--stt-mode {two_pass,continuous}` | pick the STT algorithm (default: two_pass) |
+| `--require-wake-word` | every utterance must start with a wake phrase |
+| `--barge-in` | user can interrupt the AI mid-speech (non-blocking TTS) |
+| `--no-aec` | force AEC passthrough even if speexdsp is installed |
+| `--no-chimes` | disable wake / follow-up earcons |
+| `--no-cron` | skip the cron runner |
+| `--fast-model NAME` | Whisper fast/continuous model (default: base.en) |
+| `--accurate-model NAME` | Whisper accurate model — two_pass only (default: medium.en) |
+
+Barge-in works in two modes:
+- **With speexdsp installed** — full AEC: the TTS audio gets pushed to a
+  ReferenceBuffer at 16 kHz, and the mic-capture callback cancels it out
+  of the captured frame before VAD sees it. Sub-50 ms latency interrupts
+  via a VAD-thread callback (no main-loop polling).
+- **Without speexdsp** — AEC is passthrough; the open mic will hear TTS
+  bleed-through and the wake-word matcher may misfire. Acceptable for
+  bench / demo; install `speexdsp` for production.
+
+### `core/audio/` — voice infrastructure (not plugins)
+
+Library-layer helpers used by the voice plugins:
+
+| File | Role |
+|---|---|
+| `aec.py` | `AECWrapper` — speexdsp facade with passthrough fallback |
+| `reference_buffer.py` | thread-safe ring buffer for AEC far-end audio |
+| `chimes.py` | pre-synthesized wake (A5) + follow-up (E5→B5) earcons |
+
+### Runners (not plugins)
+
+The framework also has internal background loops that aren't plugins:
+
+- `core/runners/thinking_runner.py` — fires a CoT call after each user
+  turn on a single-worker pool. Logs to `<instance>/logs/thinking.jsonl`.
+  Enable with `--think` or `JAEGER_WITH_THINKING=1`.
+- `core/cron_runner.py` — fires scheduled prompts at their cron times.
+  Started automatically at boot unless `--no-cron`.
 
 ---
 
@@ -280,9 +435,12 @@ If `core_version` falls behind the framework version, jaeger refuses to start un
 | `core/cron_runner.py` | Background thread for `schedule_prompt` |
 | `core/tools/*.py` | One file per tool category |
 | `prompts/agent_system_prompt.md` | The v2 self-improvement contract (opt-in) |
-| `plugins/mcp_bridge.py` | MCP server registry + tool routing |
-| `plugins/thinking_runner.py` | Background CoT |
-| `plugins/messaging/gateway.py` | Multi-channel messaging daemon |
+| `plugins/__init__.py` | shared bridge registry (register_bridge / get_bridge / list_bridges) |
+| `plugins/mcp/client.py` | MCP server registry + tool routing |
+| `plugins/discord/`, `plugins/telegram/`, `plugins/imessage/` | per-integration messaging bridges |
+| `plugins/messaging_gateway.py` | top-level daemon orchestrating the messaging plugins |
+| `core/runners/thinking_runner.py` | background CoT runner (NOT a plugin — framework-internal) |
+| `core/cron_runner.py` | scheduled-prompt runner (NOT a plugin) |
 
 ---
 
@@ -300,6 +458,7 @@ python benchmark/bench.py --only python_jaeger --with-jaeger
 
 ## Related docs
 
+- [VOCABULARY.md](VOCABULARY.md) — locked-down definitions of Tool / Skill / Plugin / Runner + infrastructure layers
 - [PYTHON_PYDANTIC_AI.md](PYTHON_PYDANTIC_AI.md) — the parity reference jaeger forked from
 - [FRAMEWORKS.md](FRAMEWORKS.md) — side-by-side comparison of all five
 - [AGENTIC_CODING_PRACTICE.md](AGENTIC_CODING_PRACTICE.md) — the v2 contract written as guidance for AI agent developers

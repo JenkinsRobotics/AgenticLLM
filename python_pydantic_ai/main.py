@@ -183,10 +183,31 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
 
 
 LOG_DIR = Path(__file__).resolve().parent / "logs"
-DEFAULT_MODEL_PATH = Path(
-    "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-    "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
-)
+
+
+def _resolve_model_path() -> Path:
+    """GGUF resolution chain. Mirrors model_resolver.py at repo root —
+    framework isolation rules forbid us from importing that module, so
+    the logic is duplicated here. Update both when the chain changes.
+
+    Order: AGENTICLLM_MODEL_PATH env var > HERMES_LLM_MODEL env var
+    (legacy) > <repo>/models/gemma-4-26B-A4B-it-Q4_K_M.gguf > LM Studio default.
+    """
+    for env_var in ("AGENTICLLM_MODEL_PATH", "HERMES_LLM_MODEL"):
+        v = os.environ.get(env_var)
+        if v:
+            return Path(v).expanduser()
+    # one level up from this framework dir, then into models/
+    local = Path(__file__).resolve().parent.parent / "models" / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    if local.exists():
+        return local
+    return Path(
+        "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
+        "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    )
+
+
+DEFAULT_MODEL_PATH = _resolve_model_path()
 
 
 # ============================================================================
@@ -339,9 +360,9 @@ def _build_mcp_tools(specs: list[Any]) -> list[Tool]:
 
         def _make_caller(qualified_name: str):
             def _call(**kwargs: Any) -> dict[str, Any]:
-                from .plugins import mcp_bridge
+                from .plugins.mcp import client as mcp_client
 
-                return mcp_bridge.call_mcp_tool(qualified_name, kwargs)
+                return mcp_client.call_mcp_tool(qualified_name, kwargs)
 
             _call.__name__ = qualified_name.replace(":", "_").replace("/", "_")
             return _call
@@ -959,10 +980,11 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     """Voice-loop entry point.
 
     Same agent and session history as run_command, but returns a structured
-    result instead of printing. The caller (voice_assistant) speaks the text
-    through its own TTS pipeline — unless the agent already vocalized via a
-    speak/speak_file tool call, in which case spoke_via_tool=True and the
-    caller should skip its own TTS to avoid double-speaking.
+    result instead of printing. The caller (plugins/voice_loop.py or
+    plugins/messaging_gateway.py) speaks the text through its own TTS
+    pipeline — unless the agent already vocalized via a speak/speak_file
+    tool call, in which case spoke_via_tool=True and the caller should
+    skip its own TTS to avoid double-speaking.
 
     `session_key` selects the per-channel rolling history. The voice loop
     leaves it None → "voice"; messaging bridges pass channel-specific keys
@@ -1280,9 +1302,9 @@ def init_extensions(args, client) -> None:
     # --- MCP: load bridge + record specs (agent will be rebuilt by _get_agent) ---
     if with_mcp:
         try:
-            from .plugins import mcp_bridge
+            from .plugins.mcp import client as mcp_client
 
-            registry = mcp_bridge.init_from_config()
+            registry = mcp_client.init_from_config()
             specs = registry.list_tools()
             _pipeline["mcp_specs"] = specs
             if specs:
@@ -1296,14 +1318,19 @@ def init_extensions(args, client) -> None:
     # --- Thinking: background runner with shared LLM lock -----------------------
     if with_thinking:
         try:
-            from .plugins import thinking_runner
+            from .core.runners import thinking_runner
 
             lock = threading.Lock()
             _pipeline["llm_lock"] = lock
+            # Per-framework log path: <framework>/logs/thinking.jsonl. Matches the
+            # vocabulary contract (runners write into framework logs, not into
+            # the plugins/ source tree).
+            log_path = LOG_DIR / "thinking.jsonl"
             _pipeline["thinking_runner"] = thinking_runner.ThinkingRunner(
-                client, "python_pydantic_ai", lock, _pipeline["system_prompt"]
+                client, "python_pydantic_ai", lock, _pipeline["system_prompt"],
+                log_path=log_path,
             )
-            print("[python_pydantic_ai] background thinking enabled — see thinking.jsonl.", flush=True)
+            print(f"[python_pydantic_ai] background thinking enabled — see {log_path}", flush=True)
         except Exception as exc:
             print(f"[python_pydantic_ai] --think failed: {exc}", file=sys.stderr, flush=True)
 
@@ -1536,10 +1563,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run a background thinking call after each turn; logs to thinking.jsonl.",
     )
+    parser.add_argument(
+        "--voice",
+        action="store_true",
+        help=("Launch the voice loop daemon instead of CLI chat. Flags after "
+              "--voice are forwarded to voice_loop (--stt-mode, --barge-in, "
+              "--no-aec, --require-wake-word, --no-chimes, --fast-model, "
+              "--accurate-model). See `python -m python_pydantic_ai --voice --help`."),
+    )
     return parser.parse_args()
 
 
 def main() -> int:
+    # If --voice is present, peel it off and delegate to the voice_loop
+    # daemon. Voice_loop has its own argparse for STT mode, barge-in, AEC,
+    # wake-word, chimes, model names — every flag the user types after
+    # --voice flows through unchanged.
+    if "--voice" in sys.argv[1:]:
+        sys.argv.remove("--voice")
+        from .plugins.voice_loop import main as voice_main
+        return voice_main()
     args = parse_args()
     if args.self_test:
         return self_test()

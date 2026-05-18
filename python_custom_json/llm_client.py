@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -12,10 +13,24 @@ from typing import Any
 import requests
 
 
-DEFAULT_MODEL_PATH = Path(
-    "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-    "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
-)
+def _resolve_model_path() -> Path:
+    """GGUF resolution chain. Mirrors model_resolver.py at repo root —
+    framework isolation forbids importing it. Update both together.
+    Order: AGENTICLLM_MODEL_PATH > HERMES_LLM_MODEL > <repo>/models/ > LM Studio."""
+    for env_var in ("AGENTICLLM_MODEL_PATH", "HERMES_LLM_MODEL"):
+        v = os.environ.get(env_var)
+        if v:
+            return Path(v).expanduser()
+    local = Path(__file__).resolve().parent.parent / "models" / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    if local.exists():
+        return local
+    return Path(
+        "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
+        "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    )
+
+
+DEFAULT_MODEL_PATH = _resolve_model_path()
 
 
 @dataclass

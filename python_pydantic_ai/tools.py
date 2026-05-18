@@ -8,8 +8,8 @@ work because every name is re-exported here.
 
 If you're writing NEW code, prefer importing from
 `python_pydantic_ai.core.tools` directly — that's where the real files
-live. This shim exists only so external callers (voice_assistant,
-bench harness, agent_doctor) don't need updating.
+live. This shim exists only so external callers (bench harness,
+agent_doctor) don't need updating.
 """
 
 from __future__ import annotations

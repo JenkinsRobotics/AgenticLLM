@@ -1,0 +1,11 @@
+name: discord
+version: 1
+description: |
+  Bidirectional Discord adapter. Listens for DMs and @mentions from
+  allowlisted users; lets the agent push proactive messages via
+  send_message("discord", user_id, text).
+requires:
+  libraries: [discord.py]
+  env: [DISCORD_BOT_TOKEN]
+  env_optional: [DISCORD_ALLOWED_USER_IDS]
+registers_bridges: [discord]

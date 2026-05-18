@@ -5,7 +5,7 @@
   • cancel_schedule(name)                    — remove one
 
 Persisted in <framework>/memory/schedules.jsonl, fired by the CronRunner
-inside voice_assistant.py or plugins/messaging/gateway.py.
+inside plugins/voice_loop.py or plugins/messaging_gateway.py.
 """
 
 from __future__ import annotations

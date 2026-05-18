@@ -1,0 +1,26 @@
+name: whisper_stt
+version: 1
+description: |
+  Mic capture + Whisper transcription. Two algorithmic modes share the
+  same public API (start/stop/set_paused/open_followup/next_phrase):
+    • two_pass    — VAD-segmented, fast model gates accurate model
+    • continuous  — energy-segmented, rolling re-transcription
+  Both support wake-word gating, follow-up windows, and optional AEC
+  for barge-in (passthrough when speexdsp isn't installed).
+requires:
+  libraries: [pywhispercpp, webrtcvad, sounddevice, numpy]
+  libraries_optional: [speexdsp]   # for AEC; passthrough without it
+  models:
+    - name: whisper-base.en
+      auto_download: true
+      role: fast | continuous
+    - name: whisper-medium.en
+      auto_download: true
+      role: accurate
+  hardware: [microphone]
+provides:
+  api: [start, stop, next_phrase, open_followup, set_paused, in_speech]
+capabilities: [wake_word, followup_window, two_pass_accuracy, continuous_segmentation, aec_optional]
+entrypoints:
+  two_pass: plugins.whisper_stt.two_pass:WhisperSTTTwoPass
+  continuous: plugins.whisper_stt.continuous:WhisperSTTContinuous

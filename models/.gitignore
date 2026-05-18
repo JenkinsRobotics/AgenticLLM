@@ -1,0 +1,15 @@
+# models/ holds local-only LLM weights — symlinks or copies of large GGUF files.
+# Nothing in this directory should ever be committed except README.md and this file.
+#
+# See ../docs/VOCABULARY.md → "Where models and assets live on disk" for the
+# split between repo-committed assets (small) vs external/local model weights
+# (large, never committed). Anything 100MB+ would fail `git push` anyway —
+# GitHub rejects files over that limit without Git LFS, and Git LFS for 16GB
+# of model weights is not what we want.
+
+# Ignore everything by default...
+*
+
+# ...except the README and this .gitignore.
+!README.md
+!.gitignore

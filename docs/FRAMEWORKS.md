@@ -29,6 +29,8 @@ Each has its own deep-dive doc:
 | MCP support | yes (plugin) | yes (plugin) | yes (plugin) | yes (plugin) | yes (hermes native) |
 | Background CoT | yes (`--think`) | yes (`--think`) | yes (`--think`) | yes (`--think`) | n/a |
 | Messaging gateway | yes (Discord/TG/iMsg) | yes (Discord/TG/iMsg) | no | no | hermes own (Discord/TG/Slack/WhatsApp/Signal/Email) |
+| Voice loop (mic → agent → speaker) | **yes** (`--voice`, two STT modes, optional AEC barge-in, chimes) | **yes** (same flag surface) | no | no | not wired |
+| Instance management CLI | **yes** (`--list/create/clear/delete-instance`) | n/a (single workspace) | n/a | n/a | hermes' own |
 | Transport to LLM | in-process llama-cpp | in-process llama-cpp | in-process llama-cpp | in-process llama-cpp | HTTP → `llama_cpp.server:11435` |
 | Bench score (23 prompts) | **23/23** | **23/23** | **23/23** | **23/23** | not in bench |
 | Warm latency budget | ~0.3–0.5 s | ~0.3–0.5 s | ~0.5–0.7 s | ~0.5–0.7 s | ~0.6–1.0 s (HTTP overhead) |
@@ -44,7 +46,7 @@ Latency numbers are warm-cache decision phase for a single-tool prompt. Bench hi
 - **Loop:** pydantic-ai's `agent.iter()` with skip-final intercept on 24 tools.
 - **Sandbox:** per-instance — `<instance>/skills/` is the only writable area.
 - **Memory:** per-instance, gated behind `--with-memory` (auto-on in interactive chat).
-- **Plugins:** `plugins/mcp_bridge.py`, `plugins/thinking_runner.py`, `plugins/messaging/{discord,telegram,imessage,gateway}.py`.
+- **Plugins:** `plugins/{mcp,discord,telegram,imessage}/` (each with `plugin.yaml` + smoke test). Background CoT lives in `core/runners/thinking_runner.py` — it's a Runner, not a Plugin. See [VOCABULARY.md](VOCABULARY.md).
 - **Best when:** you need a real shipping agent that can author its own skills, manages secrets safely, and gives you a real audit trail.
 - **Worst when:** you only need routing — the instance / manifest / skill-loader overhead is dead weight for one-shot routing benchmarks.
 

@@ -129,14 +129,10 @@ def run_jaeger(prompts: list[tuple[str, bool]], runs: int, instance_dir: Path) -
     dump_yaml(layout.identity_path, Identity(
         name="BenchBot", role="benchmark target", personality="Concise. Bare facts."
     ))
+    from model_resolver import resolve_model_path
     cfg = Config(
         instance_name="bench",
-        model=ModelConfig(
-            model_path=Path(
-                "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-                "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
-            )
-        ),
+        model=ModelConfig(model_path=resolve_model_path()),
         display=DisplayConfig(show_latency=False, show_tool_activity=False, show_help_on_start=False),
         skills=SkillsConfig(run_smoke_tests=False),  # don't slow startup
     )

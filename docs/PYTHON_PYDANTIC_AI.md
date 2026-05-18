@@ -11,19 +11,29 @@ This framework is the routing-speed leader. It uses Pydantic AI's typed `@agent.
 ## Entry points
 
 ```bash
-# Interactive chat
+# Interactive chat (two equivalent forms)
+python -m python_pydantic_ai
 python main.py python_pydantic_ai
 
 # One-shot
-python main.py python_pydantic_ai "what time is it"
+python -m python_pydantic_ai "what time is it"
 
 # Extensions
-python main.py python_pydantic_ai --with-memory       # carry history across turns
-python main.py python_pydantic_ai --with-mcp          # MCP server tools
-python main.py python_pydantic_ai --think             # background CoT
+python -m python_pydantic_ai --with-memory            # carry history across turns
+python -m python_pydantic_ai --with-mcp               # MCP server tools
+python -m python_pydantic_ai --think                  # background CoT
+
+# Voice loop — STT → agent → TTS, with optional wake-word and barge-in
+python -m python_pydantic_ai --voice
+python -m python_pydantic_ai --voice --require-wake-word --barge-in
+python -m python_pydantic_ai --voice --stt-mode continuous
+python -m python_pydantic_ai --voice --help           # see all voice flags
+
+# Messaging gateway (Discord + Telegram + iMessage)
+python -m python_pydantic_ai.plugins.messaging_gateway
 ```
 
-The voice loop (`voice_assistant.py`) and messaging gateway (`plugins/messaging/gateway.py`) both default to this framework as the agent backend.
+The voice loop (`plugins/voice_loop.py`) and messaging gateway (`plugins/messaging_gateway.py`) both default to this framework as the agent backend. Both share the **same plugin shape** as jaeger — see [PYTHON_JAEGER.md](PYTHON_JAEGER.md) for the deeper writeup on the voice loop architecture (kokoro_tts + whisper_stt + AEC + chimes + voice_loop daemon). The pydantic_ai versions are direct mirrors.
 
 ---
 
@@ -129,20 +139,72 @@ The bench leaves it off so the routing benchmark stays at 23/23 — accumulated 
 
 ## Plugin system
 
-Plugins in `python_pydantic_ai/plugins/`.
+Plugins live in `python_pydantic_ai/plugins/` — each is a drop-in external
+integration with its own `plugin.yaml` manifest and smoke test. Mirrors
+jaeger's layout exactly. See [VOCABULARY.md](VOCABULARY.md).
 
-### `plugins/mcp_bridge.py`
-Connects to MCP servers from `plugins/mcp_config.json`. JSON Schema → pydantic-ai `Tool` via `Tool.from_schema`. Add a new server in the config; tools register on next agent build.
+### `plugins/mcp/` — Model Context Protocol
+Connects to MCP server processes listed in `plugins/mcp/mcp_config.json`.
+JSON Schema → pydantic-ai `Tool` via `Tool.from_schema`. Add a new server
+in the config; tools register on next agent build.
 
-### `plugins/thinking_runner.py`
-Background chain-of-thought after each user turn. Single-worker pool sharing the main LLM lock so it never decodes concurrently. Writes `plugins/thinking.jsonl`.
+### `plugins/discord/`, `plugins/telegram/`, `plugins/imessage/` — messaging
+Per-integration plugins; each registers a bridge in the shared registry
+(`plugins/__init__.py`) so the `send_message(channel, recipient, text)`
+agent tool can push proactive messages.
 
-### `plugins/messaging/`
-- `gateway.py` — loads agent once, starts every adapter with credentials
-- `discord_bridge.py`, `telegram_bridge.py`, `imessage_bridge.py` — per-channel inbound + outbound
-- Shared registry; `send_message(channel, recipient, text)` pushes proactive messages from the agent or a scheduled prompt
+| Plugin | Activates when | Needs |
+|---|---|---|
+| `discord/` | `DISCORD_BOT_TOKEN` is set | `discord.py` |
+| `telegram/` | `TELEGRAM_BOT_TOKEN` is set | `python-telegram-bot` |
+| `imessage/` | `IMESSAGE_ALLOWED_HANDLES` set + macOS + Full Disk Access | — |
 
-Same plugin shape jaeger ported verbatim — see [PYTHON_JAEGER.md](PYTHON_JAEGER.md) for the deeper writeup; the architectures are identical.
+Run all three behind one daemon via the gateway:
+
+```bash
+python -m python_pydantic_ai.plugins.messaging_gateway
+```
+
+The gateway (`plugins/messaging_gateway.py`) is the orchestrator daemon — NOT a
+plugin itself. Each bridge runs in its own thread and shares the LLM lock
+so two channels can't decode concurrently.
+
+### `plugins/kokoro_tts/` — text-to-speech
+Synthesizes the agent's reply via Kokoro KPipeline + sounddevice playback.
+Provides `speak()` (sync, blocking) and `play_async()` (chunked, interruptible).
+Both apply markdown stripping before synthesis. Registers the `speak`,
+`speak_file`, `warm_kokoro` agent tools via the thin shim in
+`core/tools/speak.py`.
+
+### `plugins/whisper_stt/` — speech-to-text
+Mic capture + Whisper transcription. Two algorithms with the same API:
+`two_pass` (VAD-segmented, fast→accurate cascade — default) and
+`continuous` (energy-segmented, rolling re-transcription). Both support
+wake-word gating, follow-up windows, and optional AEC.
+
+### `plugins/voice_loop.py` — voice daemon
+Orchestrates STT → agent → TTS. NOT a plugin itself — it's the daemon
+that owns the audio devices. Optional barge-in (AEC via speexdsp; falls
+back to mic-pause heuristic when speexdsp isn't installed).
+
+```bash
+python -m python_pydantic_ai --voice                                       # CLI entry
+python -m python_pydantic_ai --voice --require-wake-word --barge-in        # robot mode
+python -m python_pydantic_ai --voice --stt-mode continuous --no-aec        # tuned
+```
+
+Plus `core/audio/` library helpers: `aec.py` (speexdsp wrapper),
+`reference_buffer.py` (AEC far-end ring buffer), `chimes.py` (wake +
+follow-up earcons). Mirrors jaeger's voice surface exactly.
+
+### Runners (not plugins)
+
+The framework also has internal background loops that aren't plugins:
+
+- `core/runners/thinking_runner.py` — fires a CoT call after each user turn.
+  Logs to `python_pydantic_ai/logs/thinking.jsonl`. Enable with `--think`
+  or `BENCH_WITH_THINKING=1`.
+- `memory/cron_runner.py` — fires scheduled prompts at their cron times.
 
 ---
 
@@ -194,9 +256,12 @@ The voice loop calls `run_for_voice`; the bench calls `run_command`; the messagi
 | `memory/memory_module.py` | facts.json read/write, episodic append, semantic search |
 | `memory/cron_runner.py` | Background scheduler for `schedule_prompt` |
 | `memory/config.py` | User-facing display config (memory/config.json) |
-| `plugins/mcp_bridge.py` | MCP registry + tool routing |
-| `plugins/thinking_runner.py` | Background CoT |
-| `plugins/messaging/*.py` | Multi-channel adapters |
+| `plugins/__init__.py` | shared bridge registry (register_bridge / get_bridge / list_bridges) |
+| `plugins/mcp/client.py` | MCP registry + tool routing |
+| `plugins/discord/`, `plugins/telegram/`, `plugins/imessage/` | per-integration messaging bridges |
+| `plugins/messaging_gateway.py` | daemon orchestrating the messaging plugins |
+| `core/runners/thinking_runner.py` | background CoT runner (NOT a plugin — framework-internal) |
+| `memory/cron_runner.py` | scheduled-prompt runner |
 | `tools.py` | Backward-compat shim re-exporting from `core.tools` |
 
 ---
@@ -218,6 +283,7 @@ from python_pydantic_ai.main import LlamaCppPythonClient, init_extensions, run_c
 
 ## Related docs
 
+- [VOCABULARY.md](VOCABULARY.md) — Tool / Skill / Plugin / Runner definitions
 - [PYTHON_JAEGER.md](PYTHON_JAEGER.md) — the production fork with skill versioning + instance isolation
 - [FRAMEWORKS.md](FRAMEWORKS.md) — side-by-side with the other four
 - [ARCHITECTURE.md](ARCHITECTURE.md) — request pipeline

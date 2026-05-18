@@ -23,7 +23,7 @@ python main.py python_hermes_xml --with-mcp
 python main.py python_hermes_xml --think
 ```
 
-`voice_assistant.py` accepts this as a swap-in backend via `VOICE_FRAMEWORK=hermes_xml`.
+No voice plugin yet — voice support lives in jaeger/pydantic_ai's `plugins/voice_loop.py`. Wire hermes_xml when bringup gets its own voice plugin.
 
 ---
 

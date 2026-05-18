@@ -6,7 +6,7 @@ shouldn't kill the assistant. This supervisor wraps any agent command and
 restarts the child with exponential backoff on non-zero exit.
 
 Usage:
-    python supervisor.py -- python voice_assistant.py
+    python supervisor.py -- python -m python_jaeger.plugins.voice_loop
     python supervisor.py --max-restarts 50 -- python main.py python_pydantic_ai
 
 Exits 0 only when the child exits 0 voluntarily (clean shutdown). Exits 1

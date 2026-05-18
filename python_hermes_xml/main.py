@@ -430,8 +430,8 @@ def _run_main(client, user_text: str, default_mode: str) -> None:
 
 
 # ============================================================================
-# run_for_voice — same surface as python_pydantic_ai.run_for_voice so
-# voice_assistant.py can swap frameworks transparently for A/B comparison.
+# run_for_voice — same surface as python_pydantic_ai.run_for_voice so the
+# voice plugin loop (when this framework gets one) can swap transparently.
 # ============================================================================
 def run_for_voice(client, user_text: str) -> dict[str, Any]:
     """Voice-loop entry point. Returns the same structured dict as

@@ -120,11 +120,8 @@ def run_jaeger(prompts: list[str]) -> list[dict[str, Any]]:
     )
     from python_jaeger.core import tools as jaeger_tools
 
-    LLM_MODEL = os.environ.get(
-        "HERMES_LLM_MODEL",
-        "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-        "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf",
-    )
+    from model_resolver import resolve_model_path
+    LLM_MODEL = str(resolve_model_path())
 
     tmp = Path(tempfile.mkdtemp(prefix="jaeger_bench_"))
     root = tmp / "instance"

@@ -61,11 +61,16 @@ class ThinkingRunner:
         framework: str,
         llm_lock: threading.Lock,
         base_system_prompt: str,
+        log_path: Path | None = None,
     ) -> None:
         self.client = client
         self.framework = framework
         self.llm_lock = llm_lock
         self.base_system_prompt = base_system_prompt
+        # When the caller supplies log_path, write per-instance under
+        # <instance>/logs/thinking.jsonl. Otherwise fall back to the
+        # module-local LOG_PATH so non-instance callers still work.
+        self.log_path = log_path or LOG_PATH
         # max_workers=1 so we never queue multiple think jobs against the model.
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="thinking")
         self._pending = 0
@@ -134,7 +139,8 @@ class ThinkingRunner:
         }
         if error:
             entry["error"] = error
-        with LOG_PATH.open("a", encoding="utf-8") as handle:
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
     def shutdown(self, wait: bool = True, timeout: float = 60.0) -> None:

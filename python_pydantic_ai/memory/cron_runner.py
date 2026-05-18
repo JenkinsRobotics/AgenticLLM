@@ -1,7 +1,8 @@
 """Background thread that fires scheduled prompts when they come due.
 
-Designed to be started by a long-running process (voice_assistant.py,
-the bench harness with --think, etc.). The bench harness intentionally
+Designed to be started by a long-running process (plugins/voice_loop.py,
+plugins/messaging_gateway.py, the bench harness with --think, etc.).
+The bench harness intentionally
 does NOT start the runner — schedules tools work standalone (write to
 schedules.jsonl) and the runner is a separate concern.
 

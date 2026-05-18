@@ -16,11 +16,16 @@ numpy>=1.26
 scipy>=1.11
 torch>=2.2
 
-# voice_assistant.py — full-duplex audio with Speex AEC + WebRTC VAD.
-# `webrtcvad-wheels` ships prebuilt arm64/x86_64 wheels and provides the
-# same `webrtcvad` import; avoids the C build that the original sdist needs.
-pyaec>=1.0
+# Voice plugins (plugins/whisper_stt/, plugins/kokoro_tts/, plugins/voice_loop.py):
+# - webrtcvad-wheels ships prebuilt arm64/x86_64 wheels and provides the same
+#   `webrtcvad` import; avoids the C build that the original sdist needs.
+# - pywhispercpp is the local Whisper backend the STT plugin uses (two-pass
+#   + continuous modes both load it).
+# - speexdsp powers AEC for barge-in. Without it, AEC silently falls back to
+#   passthrough and the voice loop still works (just no echo cancellation).
 webrtcvad-wheels>=2.0
+pywhispercpp>=1.2
+speexdsp>=0.1.1
 
 # python_pydantic_ai/ — production agent framework.
 pydantic-ai>=1.0
