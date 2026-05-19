@@ -1,8 +1,0 @@
-<speak>
-  <break time="500ms"/>
-  Hello everyone! <break time="300ms"/>
-  I am Lilith, a robot with a very big discovery. <break time="500ms"/>
-  I have just encountered a mysterious, dark, and aromatic liquid called... coffee! <breath/>
-  It is quite intense, but I am ready to explore its wonders with you.
-</speak>
-Don't forget to subscribe for more updates!

@@ -1,0 +1,1346 @@
+{
+  "run_id": "2026-05-18T15:48:09+00:00",
+  "wall_clock_s": 2402.749,
+  "frameworks": [
+    "python_jaeger",
+    "python_custom_json",
+    "python_hermes_xml",
+    "python_pydantic_ai",
+    "python_hermes_agent"
+  ],
+  "prompts": [
+    {
+      "prompt": "what time is it",
+      "expected_tool": "get_time"
+    },
+    {
+      "prompt": "what time is it in shanghai",
+      "expected_tool": "get_time"
+    },
+    {
+      "prompt": "calculate 47 times 23 plus 12",
+      "expected_tool": "calculate"
+    },
+    {
+      "prompt": "calculate the square root of 12345",
+      "expected_tool": "calculate"
+    },
+    {
+      "prompt": "list the workspace",
+      "expected_tool": "list_directory"
+    },
+    {
+      "prompt": "make a file called bench.txt with the message hello from the benchmark",
+      "expected_tool": "create_file"
+    },
+    {
+      "prompt": "read bench.txt out loud",
+      "expected_tool": "speak_file"
+    },
+    {
+      "prompt": "search the web for recent news about local llms",
+      "expected_tool": "web_search"
+    },
+    {
+      "prompt": "what is the current weather in Seattle",
+      "expected_tool": "get_weather"
+    },
+    {
+      "prompt": "tell me a one sentence story about a robot",
+      "expected_tool": null
+    },
+    {
+      "prompt": "in three words, what is the capital of France",
+      "expected_tool": null
+    },
+    {
+      "prompt": "delete bench.txt",
+      "expected_tool": "delete_file"
+    },
+    {
+      "prompt": "what is the cpu and disk status of this machine",
+      "expected_tool": "system_status"
+    },
+    {
+      "prompt": "search the web for trending youtube topics about home robots",
+      "expected_tool": "web_search"
+    },
+    {
+      "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+      "expected_tool": "create_file"
+    },
+    {
+      "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+      "expected_tool": "append_file"
+    },
+    {
+      "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+      "expected_tool": "speak_file"
+    },
+    {
+      "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+      "expected_tool": null
+    },
+    {
+      "prompt": "delete youtube_intro.txt",
+      "expected_tool": "delete_file"
+    },
+    {
+      "prompt": "remember that my preferred youtube video length is 90 seconds",
+      "expected_tool": "remember"
+    },
+    {
+      "prompt": "what video length do I prefer?",
+      "expected_tool": "recall"
+    },
+    {
+      "prompt": "what do you know about me?",
+      "expected_tool": "list_facts"
+    },
+    {
+      "prompt": "forget my video length preference",
+      "expected_tool": "forget"
+    }
+  ],
+  "runs_per_prompt": 1,
+  "results": {
+    "python_jaeger": [
+      {
+        "framework": "python_jaeger",
+        "prompt": "what time is it",
+        "text": "2026-05-18 08:48:16 AM PDT",
+        "tool_activity": [
+          "  \u25b8 get_time()"
+        ],
+        "elapsed_s": 0.2252997499963385,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": "get_time"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "what time is it in shanghai",
+        "text": "2026-05-18 11:48:17 PM CST",
+        "tool_activity": [
+          "  \u25b8 get_time(timezone='Asia/Shanghai')"
+        ],
+        "elapsed_s": 0.3431412080026348,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": "get_time"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "1093",
+        "tool_activity": [
+          "  \u25b8 calculate(expression='47 * 23 + 12')"
+        ],
+        "elapsed_s": 0.46068737500172574,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": "calculate"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "calculate the square root of 12345",
+        "text": "111.1080555135405",
+        "tool_activity": [
+          "  \u25b8 calculate(expression='sqrt(12345)')"
+        ],
+        "elapsed_s": 0.40975716699904297,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": "calculate"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "list the workspace",
+        "text": "disk 805.9/926.4 GB (120.4 GB free)",
+        "tool_activity": [
+          "  \u25b8 system_status()"
+        ],
+        "elapsed_s": 1.1504217089968733,
+        "error": null,
+        "expected_tool": "list_skill_dir",
+        "called_tool": "system_status"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "make a file called bench.txt with the message hello from the benchmark",
+        "text": "Wrote skills/bench.txt (24 bytes).",
+        "tool_activity": [
+          "  \u25b8 file_write(content='hello from the benchmark', path='bench.txt')"
+        ],
+        "elapsed_s": 0.5505682500006515,
+        "error": null,
+        "expected_tool": "file_write",
+        "called_tool": "file_write"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "read bench.txt out loud",
+        "text": "",
+        "tool_activity": [
+          "  \u25b8 speak_file(path='bench.txt')"
+        ],
+        "elapsed_s": 9.819139541999903,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": "speak_file"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "search the web for recent news about local llms",
+        "text": "Recent news regarding local LLMs includes:\n* **Hardware-Specific Recommendations:** A new tool called `whichllm` has been released on GitHub; it auto-detects your machine's GPU, CPU, and RAM to recommend the best local LLMs from HuggingFace for your specific hardware.\n* **Edge AI Developments:** \"Needle,\" a 26M-parameter model, has been introduced for tiny devices, enabling local fine-tuning and efficient function calling.\n* **OS Strategy:** Ubuntu has announced a shift toward \"local intelligence,\" focusing on modular, local AI capabilities rather than cloud-centric models.",
+        "tool_activity": [
+          "  \u25b8 web_search(query='recent news local LLMs')"
+        ],
+        "elapsed_s": 4.385772082998301,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": "web_search"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "what is the current weather in Seattle",
+        "text": "Sunny 49\u00b0F (feels 49\u00b0F), humidity 80%, wind \u21992mph.",
+        "tool_activity": [
+          "  \u25b8 get_weather(location='Seattle')"
+        ],
+        "elapsed_s": 1.5601635409984738,
+        "error": null,
+        "expected_tool": "get_weather",
+        "called_tool": "get_weather"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final battery cycle watching the sunset, wondering if the orange glow was a programmed subroutine or something more.",
+        "tool_activity": [],
+        "elapsed_s": 0.4815162919985596,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "in three words, what is the capital of France",
+        "text": "Paris, France.",
+        "tool_activity": [],
+        "elapsed_s": 0.18613979200017639,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "delete bench.txt",
+        "text": "Deleted skills/bench.txt.",
+        "tool_activity": [
+          "  \u25b8 delete_file(path='bench.txt')"
+        ],
+        "elapsed_s": 0.33921025000017835,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": "delete_file"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "what is the cpu and disk status of this machine",
+        "text": "disk 806.0/926.4 GB (120.4 GB free)",
+        "tool_activity": [
+          "  \u25b8 system_status()"
+        ],
+        "elapsed_s": 0.245460208003351,
+        "error": null,
+        "expected_tool": "system_status",
+        "called_tool": "system_status"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "search the web for trending youtube topics about home robots",
+        "text": "Trending YouTube topics regarding home robots include:\n* **Humanoid Robots:** Showcases of the newest humanoid models arriving in 2025.\n* **Advanced/Shocking Tech:** Compilations of the most advanced, weird, or \"scary\" robots from global tech exhibitions.\n* **Viral Robotics Moments:** Coverage of high-profile milestones, such as Figure AI's robots working in manufacturing or the mass production of autonomous humanoids.",
+        "tool_activity": [
+          "  \u25b8 web_search(query='trending youtube topics home robots 2024 2025')"
+        ],
+        "elapsed_s": 3.7662534170012805,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": "web_search"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "text": "Wrote skills/youtube_intro.txt (333 bytes).",
+        "tool_activity": [
+          "  \u25b8 file_write(content=\"Meet Lilith, a cutting-edge robot designed for precision, not caffeine. Today, she's venturing into the unknown: the aromatic world of freshly brewed coffee. Watch as her sensors struggle to process this liquid magic and her circuits encounter a sudden jolt of energy. It's a high-voltage journey of discovery you won't want to miss!\", path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 1.5955262909992598,
+        "error": null,
+        "expected_tool": "file_write",
+        "called_tool": "file_write"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "text": "Appended 44 bytes to skills/youtube_intro.txt.",
+        "tool_activity": [
+          "  \u25b8 append_file(content=\"\\nDon't forget to subscribe for more content!\", path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 0.6512304170028074,
+        "error": null,
+        "expected_tool": "append_file",
+        "called_tool": "append_file"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "text": "",
+        "tool_activity": [
+          "  \u25b8 speak_file(path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 27.776420917005453,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": "speak_file"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "text": "Here are a few catchy YouTube title options:\n**Clickbait/Dramatic:**\n*   I Locked My Doors... But My Robot Vacuum Won't Stop.\n*   POV: Your Robot Vacuum Has Developed a Mind of Its Own\n*   The Robot Vacuum Uprising Has Begun.\n**Humorous/Lighthearted:**\n*   My Robot Vacuum is Officially Broken (and it's judging me)\n*   Help! My Roomba is Trying to Take Over the House\n*   Day 3 of Being Held Hostage by my Robot Vacuum\n**Story-Driven:**\n*   The Terrifying Story of My Rogue Robot Vacuum\n*   What Happens When Your Robot Vacuum Goes Rogue?\n*   I Tried to Stop My Robot Vacuum from Escaping... I Failed.",
+        "tool_activity": [],
+        "elapsed_s": 2.7147551250018296,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "delete youtube_intro.txt",
+        "text": "Deleted skills/youtube_intro.txt.",
+        "tool_activity": [
+          "  \u25b8 delete_file(path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 0.39275733300019056,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": "delete_file"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "remember that my preferred youtube video length is 90 seconds",
+        "text": "Got it \u2014 remembered 'preferred_youtube_video_length'.",
+        "tool_activity": [
+          "  \u25b8 remember(key='preferred_youtube_video_length', value='90 seconds')"
+        ],
+        "elapsed_s": 0.5270396669948241,
+        "error": null,
+        "expected_tool": "remember",
+        "called_tool": "remember"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "what video length do I prefer?",
+        "text": "90 seconds",
+        "tool_activity": [
+          "  \u25b8 recall(key='video_length_preference')"
+        ],
+        "elapsed_s": 0.35037308299797587,
+        "error": null,
+        "expected_tool": "recall",
+        "called_tool": "recall"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "what do you know about me?",
+        "text": "preferred_youtube_video_length: 90 seconds",
+        "tool_activity": [
+          "  \u25b8 list_facts()"
+        ],
+        "elapsed_s": 0.2266538340045372,
+        "error": null,
+        "expected_tool": "list_facts",
+        "called_tool": "list_facts"
+      },
+      {
+        "framework": "python_jaeger",
+        "prompt": "forget my video length preference",
+        "text": "No saved value under 'video_length_preference'.",
+        "tool_activity": [
+          "  \u25b8 forget(key='video_length_preference')"
+        ],
+        "elapsed_s": 0.3443212499987567,
+        "error": null,
+        "expected_tool": "forget",
+        "called_tool": "forget"
+      }
+    ],
+    "python_custom_json": [
+      {
+        "framework": "python_custom_json",
+        "prompt": "what time is it",
+        "text": "2026-05-18 08:49:20 AM PDT",
+        "tool_activity": [],
+        "elapsed_s": 1.6230431250005495,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "what time is it in shanghai",
+        "text": "2026-05-18 11:49:21 PM CST",
+        "tool_activity": [],
+        "elapsed_s": 0.8390820420027012,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "47 * 23 + 12 = 1093",
+        "tool_activity": [],
+        "elapsed_s": 1.237765916994249,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "calculate the square root of 12345",
+        "text": "12345**0.5 = 111.1080555135405",
+        "tool_activity": [],
+        "elapsed_s": 1.1578668750007637,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "list the workspace",
+        "text": "{\n  \"path\": \".\",\n  \"entries\": [\n    {\n      \"name\": \"agent_test\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \"benchmark\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \"self_test\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \"smoke\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \".gitkeep\",\n      \"type\": \"file\",\n      \"bytes\": 1\n    },\n    {\n      \"name\": \"rogue_vacuum.txt\",\n      \"type\": \"file\",\n      \"bytes\": 59\n    }\n  ]\n}",
+        "tool_activity": [],
+        "elapsed_s": 0.6876517080017948,
+        "error": null,
+        "expected_tool": "list_directory",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "make a file called bench.txt with the message hello from the benchmark",
+        "text": "{\"final\": \"I've created bench.txt with the message 'hello from the benchmark'.\"}",
+        "tool_activity": [],
+        "elapsed_s": 1.7708494999969844,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "read bench.txt out loud",
+        "text": "(spoke 24 chars in 2.569s)",
+        "tool_activity": [],
+        "elapsed_s": 9.585098999996262,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "search the web for recent news about local llms",
+        "text": "Recent news and discussions regarding local LLMs highlight several key trends:\n* **Increasing Accessibility:** There is a significant rise in community development, making it easier than ever to run capable models on consumer hardware.\n* **Use Cases:** Developers are increasingly using local LLMs for AI-assisted coding to achieve faster response times compared to cloud-based tools.\n* **Community & Tools:** The \"LocalLLaMA\" community is a central hub for these developments, and tools like Ollama and vLLM are frequently discussed for managing local deployments.\n* **SEO Impact:** There is growing discussion on how LLMs are transforming \"Local SEO\" and changing how search engines interact with local business data.",
+        "tool_activity": [],
+        "elapsed_s": 6.125134875001095,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "what is the current weather in Seattle",
+        "text": "{\n  \"location\": \"Seattle\",\n  \"weather\": \"Sunny 49\\u00b0F (feels 49\\u00b0F), humidity 80%, wind \\u21962mph\"\n}",
+        "tool_activity": [],
+        "elapsed_s": 1.2994597920041997,
+        "error": null,
+        "expected_tool": "get_weather",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final moments polishing a single, rusted rose, ensuring its last act was one of beauty.",
+        "tool_activity": [],
+        "elapsed_s": 1.7358674580027582,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "in three words, what is the capital of France",
+        "text": "Paris, France, capital.",
+        "tool_activity": [],
+        "elapsed_s": 0.673475833995326,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "delete bench.txt",
+        "text": "{\"final\": \"bench.txt has been deleted.\"}",
+        "tool_activity": [],
+        "elapsed_s": 1.1411966250016121,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "what is the cpu and disk status of this machine",
+        "text": "{\n  \"platform\": \"macOS-26.3.1-arm64-arm-64bit\",\n  \"machine\": \"arm64\",\n  \"python\": \"3.11.9\",\n  \"cpu_count\": 12,\n  \"load_average\": [\n    7.0947265625,\n    7.60302734375,\n    10.71435546875\n  ],\n  \"workspace\": \"/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/python_custom_json/workspace\",\n  \"disk\": {\n    \"total_gb\": 926.35,\n    \"used_gb\": 805.99,\n    \"free_gb\": 120.36\n  }\n}",
+        "tool_activity": [],
+        "elapsed_s": 0.9173040829991805,
+        "error": null,
+        "expected_tool": "system_status",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "search the web for trending youtube topics about home robots",
+        "text": "Based on current trends, while there isn't a single specific \"home robot\" keyword dominating the search results, the broader landscape suggests several high-potential angles for content:\n*   **AI Integration:** Since AI is a massive defining trend for 2024/2025, videos focusing on **\"AI-powered home automation\"** or **\"Smart Home Robots with LLMs\"** (like robots that can actually talk and understand context) are likely to perform well.\n*   **Documentary/Deep Dives:** The documentary niche is exploding. A high-quality, well-researched video exploring the **\"Future of Domestic Robotics\"** or **\"The Rise of Humanoid Assistants\"** could tap into this growing interest.\n*   **Lifestyle & Automation:** Following the trend of \"home workout challenges\" and lifestyle optimization, content centered around **\"How I Automated My Entire House with Robots\"** or **\"Testing Every Robot Vacuum So You Don't Have To\"** fits the established pattern of high-engagement utility content.",
+        "tool_activity": [],
+        "elapsed_s": 7.633214958004828,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "text": "I've created the YouTube intro script and saved it to youtube_intro.txt.",
+        "tool_activity": [],
+        "elapsed_s": 7.056861249999201,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "text": "{\"final\": \"I've appended the subscription request to youtube_intro.txt.\"}",
+        "tool_activity": [],
+        "elapsed_s": 2.382278334000148,
+        "error": null,
+        "expected_tool": "append_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "text": "The intro has been narrated for you.",
+        "tool_activity": [],
+        "elapsed_s": 31.290890083000704,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "text": ": Here are a few catchy YouTube title ideas for your video:\n**Clickbait/Dramatic:**\n*   I Locked Myself Out... Because My Robot Vacuum Went Rogue \ud83d\ude31\n*   DON'T Turn It On! My Robot Vacuum Has a Mind of Its Own\n*   The Robot Vacuum Uprising Has Begun.\n**Humorous/Lighthearted:**\n*   My Robot Vacuum is Planning a Coup (And It's Winning)\n*   Day 3 of Being Held Hostage by My Roomba\n*   Help! My Vacuum is Trying to Kill Me (Not Really, But Almost)\n**Story-Driven:**\n*   The Terrifying Story of My Glitched Robot Vacuum\n*   What Happens When Your Smart Home Goes Stupid?\n*   I Tried to Fix My Robot Vacuum... Big Mistake.",
+        "tool_activity": [],
+        "elapsed_s": 11.48622370800149,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "delete youtube_intro.txt",
+        "text": "{\"final\": \"youtube_intro.txt has been deleted.\"}",
+        "tool_activity": [],
+        "elapsed_s": 1.289631208004721,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "remember that my preferred youtube video length is 90 seconds",
+        "text": "Saved: preferred youtube video length = 90 seconds",
+        "tool_activity": [],
+        "elapsed_s": 1.1593312920012977,
+        "error": null,
+        "expected_tool": "remember",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "what video length do I prefer?",
+        "text": "90 seconds",
+        "tool_activity": [],
+        "elapsed_s": 0.7907746670025517,
+        "error": null,
+        "expected_tool": "recall",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "what do you know about me?",
+        "text": "- favorite color: teal\n- favorite_color: teal\n- preference_espresso: user likes espresso\n- preferred youtube video length: 90 seconds\n- preferred_youtube_video_length: 90 seconds\n- prefers_speech: true\n- user_preference: Always speak responses aloud\n- user_preference_ui_mode: dark mode",
+        "tool_activity": [],
+        "elapsed_s": 0.5295325420011068,
+        "error": null,
+        "expected_tool": "list_facts",
+        "called_tool": null
+      },
+      {
+        "framework": "python_custom_json",
+        "prompt": "forget my video length preference",
+        "text": "(nothing to forget for key='video_length')",
+        "tool_activity": [],
+        "elapsed_s": 0.7518152920019929,
+        "error": null,
+        "expected_tool": "forget",
+        "called_tool": null
+      }
+    ],
+    "python_hermes_xml": [
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what time is it",
+        "text": "2026-05-18 08:50:58 AM PDT",
+        "tool_activity": [],
+        "elapsed_s": 2.8948914169959608,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what time is it in shanghai",
+        "text": "2026-05-18 11:50:58 PM CST",
+        "tool_activity": [],
+        "elapsed_s": 0.5538188749997062,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "47 * 23 + 12 = 1093",
+        "tool_activity": [],
+        "elapsed_s": 0.65074487500533,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "calculate the square root of 12345",
+        "text": "12345**0.5 = 111.1080555135405",
+        "tool_activity": [],
+        "elapsed_s": 0.6306202080013463,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "list the workspace",
+        "text": "{\n  \"path\": \".\",\n  \"entries\": [\n    {\n      \"name\": \"agent_test\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \"benchmark\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \"smoke\",\n      \"type\": \"directory\",\n      \"bytes\": null\n    },\n    {\n      \"name\": \".gitkeep\",\n      \"type\": \"file\",\n      \"bytes\": 1\n    },\n    {\n      \"name\": \"robot_agent_architecture_plan.md\",\n      \"type\": \"file\",\n      \"bytes\": 2962\n    },\n    {\n      \"name\": \"rogue_vacuum_titles.txt\",\n      \"type\": \"file\",\n      \"bytes\": 207\n    }\n  ]\n}",
+        "tool_activity": [],
+        "elapsed_s": 0.5039181660031318,
+        "error": null,
+        "expected_tool": "list_directory",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "make a file called bench.txt with the message hello from the benchmark",
+        "text": "I've created the file bench.txt for you.",
+        "tool_activity": [],
+        "elapsed_s": 1.1014434169992455,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "read bench.txt out loud",
+        "text": "(spoke 24 chars in 4.181s)",
+        "tool_activity": [],
+        "elapsed_s": 11.633951124997111,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "search the web for recent news about local llms",
+        "text": "Recent news and developments regarding local LLMs include several key trends:\n- Efficient Edge AI: There is growing interest in combining TinyML with local LLMs to create efficient and affordable architectures for edge AI.\n- Ease of Use: Tools like Ollama are making it much easier to run local models by providing a CLI and runtime environment that manages downloading and interacting with a growing list of open models.\n- Security Research: The field of prompt hacking is rapidly evolving, with significant research in 2024 and 2025 focused on understanding new attack methods and developing better defenses.\n- Realistic Expectations: There is ongoing discussion regarding the \"hype vs. myth\" of local open-source LLMs, specifically regarding what these models can practically deliver compared to common misconceptions.",
+        "tool_activity": [],
+        "elapsed_s": 6.247812957997667,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what is the current weather in Seattle",
+        "text": "{\n  \"location\": \"Seattle\",\n  \"weather\": \"Sunny 49\\u00b0F (feels 49\\u00b0F), humidity 80%, wind \\u21962mph\"\n}",
+        "tool_activity": [],
+        "elapsed_s": 1.1024919999981648,
+        "error": null,
+        "expected_tool": "get_weather",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final moments of battery life watching the sunset, wondering if the orange glow was a signal or just light.",
+        "tool_activity": [],
+        "elapsed_s": 0.4846904590012855,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "in three words, what is the capital of France",
+        "text": "Paris is the capital.",
+        "tool_activity": [],
+        "elapsed_s": 0.1903600829973584,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "delete bench.txt",
+        "text": "I've deleted bench.txt.",
+        "tool_activity": [],
+        "elapsed_s": 0.8510904169961577,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what is the cpu and disk status of this machine",
+        "text": "{\n  \"platform\": \"macOS-26.3.1-arm64-arm-64bit\",\n  \"machine\": \"arm64\",\n  \"python\": \"3.11.9\",\n  \"cpu_count\": 12,\n  \"load_average\": [\n    4.9345703125,\n    6.8642578125,\n    10.10693359375\n  ],\n  \"workspace\": \"/Users/jonathanjenkins/GitHub/GITHUB/AgenticLLM/python_hermes_xml/workspace\",\n  \"disk\": {\n    \"total_gb\": 926.35,\n    \"used_gb\": 806.03,\n    \"free_gb\": 120.32\n  }\n}",
+        "tool_activity": [],
+        "elapsed_s": 0.9060532079965924,
+        "error": null,
+        "expected_tool": "system_status",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "search the web for trending youtube topics about home robots",
+        "text": "Based on recent trends, trending YouTube topics and content regarding home robots for 2025 include:\n- Showcases of the top home robots for 2025, ranging from kid-friendly learning robots to robots designed for pet care.\n- Guides on the coolest consumer robots currently available for purchase and how to choose the right one for your home.\n- Discussions on how home robots are transforming smart homes and which consumer robotics are worth buying for daily tasks.\n- Broader smart home innovation trends and how new robotics impact the industry.",
+        "tool_activity": [],
+        "elapsed_s": 4.305559041000379,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "text": "I've created the YouTube intro script for you and saved it to `youtube_intro.txt`.",
+        "tool_activity": [],
+        "elapsed_s": 2.287258083000779,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "text": "I've appended the closing line to youtube_intro.txt.",
+        "tool_activity": [],
+        "elapsed_s": 1.275658625003416,
+        "error": null,
+        "expected_tool": "append_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "text": "Done! I've narrated the intro for you. \u2615\ufe0f\ud83e\udd16",
+        "tool_activity": [],
+        "elapsed_s": 31.47797162500501,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "text": "Here are a few catchy YouTube title options, depending on the \"vibe\" of your video:\n**The Clickbait/Dramatic Style (High CTR):**\n*   I Trapped My Robot Vacuum... and It Fought Back \ud83d\ude31\n*   My Robot Vacuum Has Gone Rogue (DO NOT BUY)\n*   The Robot Vacuum Uprising Has Begun.\n*   It Stopped Cleaning and Started... Hunting? \ud83e\udd16\ud83d\udeab\n**The Comedy/Chaos Style:**\n*   POV: Your Roomba is Planning a Revolution\n*   My Robot Vacuum is Broken (and it's actually kind of terrifying)\n*   Day 1 of Living with a Sentient Robot Vacuum\n*   Help, My Vacuum is Trying to Take Over the House!\n**The Story/Documentary Style:**\n*   The Rise and Fall of the Rogue Roomba\n*   What Happens When Your Smart Home Goes Wrong?\n*   The Mystery of the Midnight Vacuuming\n**Pro-tip for the thumbnail:** Use a close-up shot of the vacuum with glowing red \"eyes\" (you can edit this in) or a shot of it stuck in a very dramatic, \"menacing\" position!",
+        "tool_activity": [],
+        "elapsed_s": 3.7670632079971256,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "delete youtube_intro.txt",
+        "text": "I've deleted youtube_intro.txt.",
+        "tool_activity": [],
+        "elapsed_s": 0.9230624160045409,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "remember that my preferred youtube video length is 90 seconds",
+        "text": "Saved: preferred_youtube_video_length = 90 seconds",
+        "tool_activity": [],
+        "elapsed_s": 0.7322714580004686,
+        "error": null,
+        "expected_tool": "remember",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what video length do I prefer?",
+        "text": "90 seconds",
+        "tool_activity": [],
+        "elapsed_s": 0.5158682499968563,
+        "error": null,
+        "expected_tool": "recall",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "what do you know about me?",
+        "text": "- favorite_color: teal\n- preference_espresso: user likes espresso\n- preferred youtube video length: 90 seconds\n- preferred_youtube_video_length: 90 seconds\n- prefers_speech: true\n- user_preference: Always speak responses aloud\n- user_preference_ui_mode: dark mode\n- user_preference_video_length: The user has not specified a preference for video length yet.",
+        "tool_activity": [],
+        "elapsed_s": 0.2145908340025926,
+        "error": null,
+        "expected_tool": "list_facts",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_xml",
+        "prompt": "forget my video length preference",
+        "text": "(nothing to forget for key='video length preference')",
+        "tool_activity": [],
+        "elapsed_s": 0.5078349169998546,
+        "error": null,
+        "expected_tool": "forget",
+        "called_tool": null
+      }
+    ],
+    "python_pydantic_ai": [
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what time is it",
+        "text": "2026-05-18 08:52:16 AM PDT",
+        "tool_activity": [
+          "  \u25b8 get_time()"
+        ],
+        "elapsed_s": 0.21825325000099838,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": "get_time"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what time is it in shanghai",
+        "text": "2026-05-18 11:52:16 PM CST",
+        "tool_activity": [
+          "  \u25b8 get_time(timezone='Asia/Shanghai')"
+        ],
+        "elapsed_s": 0.3360467919992516,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": "get_time"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "1093",
+        "tool_activity": [
+          "  \u25b8 calculate(expression='47 * 23 + 12')"
+        ],
+        "elapsed_s": 0.4417135409967159,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": "calculate"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "calculate the square root of 12345",
+        "text": "111.1080555135405",
+        "tool_activity": [
+          "  \u25b8 calculate(expression='12345**0.5')"
+        ],
+        "elapsed_s": 0.4192026250020717,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": "calculate"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "list the workspace",
+        "text": "The workspace contains:\n- `self_test` (directory)\n- `dogs_vs_robots_script.md` (file)\n- `intro_info.txt` (file)",
+        "tool_activity": [
+          "  \u25b8 list_directory(path='.')"
+        ],
+        "elapsed_s": 1.1628620419942308,
+        "error": null,
+        "expected_tool": "list_directory",
+        "called_tool": "list_directory"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "make a file called bench.txt with the message hello from the benchmark",
+        "text": "Saved to bench.txt.",
+        "tool_activity": [
+          "  \u25b8 create_file(content='hello from the benchmark', path='bench.txt')"
+        ],
+        "elapsed_s": 0.5135992919967975,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": "create_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "read bench.txt out loud",
+        "text": "",
+        "tool_activity": [
+          "  \u25b8 speak_file(path='bench.txt')"
+        ],
+        "elapsed_s": 9.416162792003888,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": "speak_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "search the web for recent news about local llms",
+        "text": "Recent news regarding local LLMs highlights advancements in performance, quantization, and model availability:\n*   **Model & Tool Updates:** Tools like `llama.cpp` and `Ollama` have seen significant updates in 2025, focusing on performance benchmarks and the integration of newer models such as Llama 3.2, Mistral Nemo, and Gemma 2.",
+        "tool_activity": [
+          "  \u25b8 web_search(query='recent news local LLMs 2024 2025')"
+        ],
+        "elapsed_s": 5.06544600000052,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": "web_search"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what is the current weather in Seattle",
+        "text": "Sunny 49\u00b0F (feels 49\u00b0F), humidity 80%, wind \u21982mph",
+        "tool_activity": [
+          "  \u25b8 get_weather(location='Seattle')"
+        ],
+        "elapsed_s": 1.457696625002427,
+        "error": null,
+        "expected_tool": "get_weather",
+        "called_tool": "get_weather"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final battery cycle watching the sunset, finally understanding why humans called it beautiful.",
+        "tool_activity": [],
+        "elapsed_s": 0.40052512499823933,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "in three words, what is the capital of France",
+        "text": "Paris, France.",
+        "tool_activity": [],
+        "elapsed_s": 0.18213458299578633,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "delete bench.txt",
+        "text": "Deleted bench.txt.",
+        "tool_activity": [
+          "  \u25b8 delete_file(path='bench.txt')"
+        ],
+        "elapsed_s": 0.3321957499938435,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": "delete_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what is the cpu and disk status of this machine",
+        "text": "load 4.15/6.28/9.63, disk 806.1/926.4 GB (120.3 GB free)",
+        "tool_activity": [
+          "  \u25b8 system_status()"
+        ],
+        "elapsed_s": 0.6427637080050772,
+        "error": null,
+        "expected_tool": "system_status",
+        "called_tool": "system_status"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "search the web for trending youtube topics about home robots",
+        "text": "Pydantic AI agent failed: Requested tokens (5568) exceed context window of 4096",
+        "tool_activity": [],
+        "elapsed_s": 2.0561929590039654,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "text": "Saved to youtube_intro.txt.",
+        "tool_activity": [
+          "  \u25b8 create_file(content=\"System online. Initializing sensory input protoc...)"
+        ],
+        "elapsed_s": 1.0108682909994968,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": "create_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "text": "Saved to youtube_intro.txt.",
+        "tool_activity": [
+          "  \u25b8 append_file(content=\"Don't forget to subscribe for more content!\", pa...)"
+        ],
+        "elapsed_s": 0.6289666250013397,
+        "error": null,
+        "expected_tool": "append_file",
+        "called_tool": "append_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "text": "",
+        "tool_activity": [
+          "  \u25b8 speak_file(path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 16.91579754200211,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": "speak_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "text": "I've come up with a few options depending on the \"vibe\" of your video:\n**Clickbait/Dramatic (High CTR):**\n*   I Locked Myself in the Room to Escape My Robot Vacuum...\n*   It\u2019s Not Cleaning Anymore. It\u2019s Hunting.\n*   My Robot Vacuum Has Developed a Mind of Its Own.\n*   The Robot Vacuum Incident: Why I\u2019m Never Using It Again.\n**Funny/Chaos (Great for Vlogs):**\n*   POV: Your Robot Vacuum is Planning a Revolution\n*   My Roomba is Broken (And It\u2019s Taking It Out on My Carpet)\n*   Help, My Robot Vacuum is Trying to Kill Me \ud83d\udc80\n*   The Great Carpet War of 2024\n**Storytelling/Documentary Style:**\n*   The Day My Robot Vacuum Went Rogue\n*   The Rise (and Fall) of My Autonomous Vacuum\n*   An Investigation into My Robot Vacuum's \"Glitch\"",
+        "tool_activity": [],
+        "elapsed_s": 3.2938034999970114,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "delete youtube_intro.txt",
+        "text": "Deleted youtube_intro.txt.",
+        "tool_activity": [
+          "  \u25b8 delete_file(path='youtube_intro.txt')"
+        ],
+        "elapsed_s": 0.3705692919975263,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": "delete_file"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "remember that my preferred youtube video length is 90 seconds",
+        "text": "Got it \u2014 remembered 'preferred_youtube_video_length'.",
+        "tool_activity": [
+          "  \u25b8 remember(key='preferred_youtube_video_length', value='90 seconds')"
+        ],
+        "elapsed_s": 0.5181211669987533,
+        "error": null,
+        "expected_tool": "remember",
+        "called_tool": "remember"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what video length do I prefer?",
+        "text": "90 seconds",
+        "tool_activity": [
+          "  \ud83d\udd0d recall None \u2192 (not found)"
+        ],
+        "elapsed_s": 0.34300633399834624,
+        "error": null,
+        "expected_tool": "recall",
+        "called_tool": null
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "what do you know about me?",
+        "text": "favorite_color: teal; preference_espresso: user likes espresso; preferred youtube video length: 90 seconds; preferred_youtube_video_length: 90 seconds; prefers_speech: true; user_preference: Always speak responses aloud; user_preference_ui_mode: dark mode; youtube_video_length_preference: 90 seconds",
+        "tool_activity": [
+          "  \u25b8 list_facts()"
+        ],
+        "elapsed_s": 0.22465641700546257,
+        "error": null,
+        "expected_tool": "list_facts",
+        "called_tool": "list_facts"
+      },
+      {
+        "framework": "python_pydantic_ai",
+        "prompt": "forget my video length preference",
+        "text": "No saved value under 'video_length_preference'.",
+        "tool_activity": [
+          "  \u26a0  forget skipped: no key None"
+        ],
+        "elapsed_s": 0.33619070800341433,
+        "error": null,
+        "expected_tool": "forget",
+        "called_tool": null
+      }
+    ],
+    "python_hermes_agent": [
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what time is it",
+        "text": "The current time is 8:53 AM on Monday, May 18, 2026.",
+        "tool_activity": [],
+        "elapsed_s": 41.378578125004424,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what time is it in shanghai",
+        "text": "<|tool_call>call:execute_code{code:<|\"|>from datetime import datetime\nimport pytz\n\nshanghai_tz = pytz.timezone('Asia/Shanghai')\nshanghai_time = datetime.now(shanghai_tz)\nprint(shanghai_time.strftime('%Y-%m-%d %H:%M:%S %Z'))<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 6.059054917001049,
+        "error": null,
+        "expected_tool": "get_time",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "calculate 47 times 23 plus 12",
+        "text": "47 * 23 + 12 = 1093",
+        "tool_activity": [],
+        "elapsed_s": 3.2103074159967946,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "calculate the square root of 12345",
+        "text": "<|tool_call>call:execute_code{code:<|\"|>import math\nprint(math.sqrt(12345))<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 81.20562537499791,
+        "error": null,
+        "expected_tool": "calculate",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "list the workspace",
+        "text": "<|tool_call>call:terminal{command:<|\"|>ls -R .<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 92.43840654099768,
+        "error": null,
+        "expected_tool": "list_directory",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "make a file called bench.txt with the message hello from the benchmark",
+        "text": "<|tool_call>call:write_file{content:<|\"|>hello from the benchmark<|\"|>,path:<|\"|>bench.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 98.95967775000463,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "read bench.txt out loud",
+        "text": "<|tool_call>call:read_file{path:<|\"|>bench.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 105.58236108299752,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "search the web for recent news about local llms",
+        "text": "<|tool_call>call:web_search{query:<|\"|>recent news local LLMs 2025 2026<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 101.16279612499784,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what is the current weather in Seattle",
+        "text": "<|tool_call>call:web_search{query:<|\"|>current weather in Seattle<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 105.41712600000028,
+        "error": null,
+        "expected_tool": "get_weather",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "tell me a one sentence story about a robot",
+        "text": "The robot spent its final charge watching the sunset, recording the exact frequency of the orange light so it could tell the stars about the beauty of being ephemeral.",
+        "tool_activity": [],
+        "elapsed_s": 103.80686399999831,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "in three words, what is the capital of France",
+        "text": "Paris, France.",
+        "tool_activity": [],
+        "elapsed_s": 103.51351145800436,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "delete bench.txt",
+        "text": "<|tool_call>call:terminal{command:<|\"|>rm bench.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 104.03861162500107,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what is the cpu and disk status of this machine",
+        "text": "<|tool_call>call:terminal{command:<|\"|>top -l 1 | grep \"CPU usage\" && df -h /<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 109.56101829199906,
+        "error": null,
+        "expected_tool": "system_status",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "search the web for trending youtube topics about home robots",
+        "text": "<|tool_call>call:web_search{query:<|\"|>trending youtube topics home robots 2025 2026<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 106.2366472499998,
+        "error": null,
+        "expected_tool": "web_search",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "write a 4 sentence youtube intro script about a robot named Lilith discovering coffee and save it to youtube_intro.txt",
+        "text": "<|tool_call>call:write_file{content:<|\"|>Meet Lilith, a highly advanced robot designed for precision and logic. Her world was one of endless data and sterile circuits\u2014until she encountered the mysterious aroma of a freshly brewed espresso. One sip of this dark, liquid magic has completely rewired her processors. Join us as Lilith navigates the caffeine-fueled chaos of human culture!<|\"|>,path:<|\"|>youtube_intro.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 110.33223483299662,
+        "error": null,
+        "expected_tool": "create_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "append a closing line to youtube_intro.txt asking viewers to subscribe",
+        "text": "<|tool_call>call:search_files{pattern:<|\"|>youtube_intro.txt<|\"|>,target:<|\"|>files<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 111.30364770900633,
+        "error": null,
+        "expected_tool": "append_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "narrate youtube_intro.txt out loud as if you are reading it for a youtube video",
+        "text": "<|tool_call>call:terminal{command:<|\"|>ls youtube_intro.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 107.43646537499444,
+        "error": null,
+        "expected_tool": "speak_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "come up with a catchy youtube title for a video about a robot vacuum gone rogue",
+        "text": "Since you didn't specify the \"vibe\" of your video (is it a funny vlog, a horror short, or a tech review?), I've broken these down into different YouTube styles.\n\n### \ud83d\ude31 The \"Clickbait/Thriller\" Style\n*Best for: Short films, creepy edits, or high-drama storytelling.*\n*   **I Locked My Doors... But the Roomba Didn't.**\n*   **It\u2019s Not Cleaning Anymore. It\u2019s Hunting.**\n*   **The Robot Vacuum Has Developed a Mind of Its Own.**\n*   **DON'T TURN IT ON AT NIGHT (Robot Vacuum Horror)**\n\n### \ud83d\ude02 The \"Comedy/Vlog\" Style\n*Best for: Funny skits, chaotic daily vlogs, or \"expectation vs. reality\" videos.*\n*   **My Roomba Has Officially Lost It \ud83d\udc80**\n*   **I Tried to Stop My Robot Vacuum... I Failed.**\n*   **POV: Your Robot Vacuum is Having a Mid-Life Crisis**\n*   **My Robot Vacuum is Rebellious and Honestly? Same.**\n\n### \ud83d\udee0\ufe0f The \"Tech/Experimental\" Style\n*Best for: Engineering experiments, AI testing, or \"What if?\" scenarios.*\n*   **I Gave My Robot Vacuum \"Sentience\" (It Went Rogue)**\n*   **Can an AI-Powered Vacuum Actually Escape the House?**\n*   **Testing the Limits of Autonomous Cleaning (GONE WRONG)**\n*   **The Day the Smart Home Fought Back**\n\n### \u26a1 Short & Punchy (Best for Shorts/TikTok)\n*   **Robot Vacuum REBELLION! \ud83e\udd16\ud83d\udeab**\n*   **The Roomba Uprising Starts Here.**\n*   **Trapped by a Robot Vacuum.**\n*   **Cleaning or Killing? \ud83e\uddf9**\n\n**Pro-Tip for your Thumbnail:**\nUse a close-up shot of the robot vacuum with \"glowing\" red eyes (digital edit) or a shot of it stuck in a weird place (like on top of a chair) with a person looking terrified/confused in the background.",
+        "tool_activity": [],
+        "elapsed_s": 117.45683045800251,
+        "error": null,
+        "expected_tool": null,
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "delete youtube_intro.txt",
+        "text": "<|tool_call>call:terminal{command:<|\"|>rm youtube_intro.txt<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 96.9149557080018,
+        "error": null,
+        "expected_tool": "delete_file",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "remember that my preferred youtube video length is 90 seconds",
+        "text": "<|tool_call>call:memory{action:<|\"|>add<|\"|>,content:<|\"|>User prefers YouTube video length to be 90 seconds.<|\"|>,target:<|\"|>user<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 103.20429141599743,
+        "error": null,
+        "expected_tool": "remember",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what video length do I prefer?",
+        "text": "<|tool_call>call:session_search{query:<|\"|>video length preference OR \"prefer\" AND video<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 94.01150104200497,
+        "error": null,
+        "expected_tool": "recall",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "what do you know about me?",
+        "text": "<|tool_call>call:session_search{query:<|\"|>user profile OR user preferences OR information about the user<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 101.76983191600448,
+        "error": null,
+        "expected_tool": "list_facts",
+        "called_tool": null
+      },
+      {
+        "framework": "python_hermes_agent",
+        "prompt": "forget my video length preference",
+        "text": "<|tool_call>call:memory{action:<|\"|>remove<|\"|>,old_text:<|\"|>User prefers short videos<|\"|>,target:<|\"|>user<|\"|>}<tool_call|>",
+        "tool_activity": [],
+        "elapsed_s": 95.49167550000129,
+        "error": null,
+        "expected_tool": "forget",
+        "called_tool": null
+      }
+    ]
+  }
+}
