@@ -47,9 +47,9 @@ from pydantic_ai.usage import RequestUsage
 from .core import credentials as creds
 from .core import log_rotation
 from .core import memory as mem
-from .core import prompts as prompt_module
-from .core import tools as jaeger_tools
-from .core.cron_runner import CronRunner
+from .agent import prompts as prompt_module
+from .agent import tools as jaeger_tools
+from .agent.background.cron_runner import CronRunner
 from .core.instance import (
     CoreVersionMismatch,
     InstanceLayout,
@@ -62,7 +62,7 @@ from .core.instance import (
 from .core.llm_model import LlamaCppModel
 from .core.schemas import CORE_VERSION, Config
 from .core.schemas import load_yaml
-from .core.skill_loader import load_and_register
+from .agent.skill_registry.skill_loader import load_and_register
 from .core.setup_wizard import run_wizard
 
 
@@ -592,7 +592,7 @@ def _register_builtins(agent: Agent[None, str], client: Any) -> None:
         the skill is NOT registered and you must fix the skill (not the
         test) before retrying. Returns the names of skills newly
         registered this call."""
-        from .core.skill_loader import load_and_register, _REGISTERED_KEYS
+        from .agent.skill_registry.skill_loader import load_and_register, _REGISTERED_KEYS
         cfg = _pipeline["config"]
         before = {(n, v, z) for (n, v, z) in _REGISTERED_KEYS}
         report = load_and_register(
@@ -1050,7 +1050,7 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_thinking:
         try:
-            from .core.runners import thinking_runner
+            from .agent.runners import thinking_runner
             lock = _pipeline.get("llm_lock") or threading.Lock()
             _pipeline["llm_lock"] = lock
             # Per-instance log path keeps thinking output out of the framework
@@ -1213,7 +1213,7 @@ def _handle_slash(cmd: str, client: Any | None) -> bool:
         print(f"  tool activity → {'on' if _pipeline['show_tool_activity'] else 'off'}")
         return True
     if head == "/skills":
-        from .core.skill_loader import discover_skills
+        from .agent.skill_registry.skill_loader import discover_skills
         for s in discover_skills(_pipeline["layout"]):
             print(f"  {s.zone:8s}  {s.name}_v{s.version}  ({s.module_path})")
         return True
@@ -1318,7 +1318,7 @@ def self_test(layout: InstanceLayout) -> int:
 
     # Skill discovery
     try:
-        from .core.skill_loader import discover_skills
+        from .agent.skill_registry.skill_loader import discover_skills
         discovered = discover_skills(layout)
         names = [f"{s.name}_v{s.version}({s.zone})" for s in discovered]
         print(f"== skill discovery == {names or '(none yet — core skills/ empty)'}")

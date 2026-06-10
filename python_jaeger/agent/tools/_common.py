@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..instance import InstanceLayout
+from python_jaeger.core.instance import InstanceLayout
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ def bind(layout: InstanceLayout) -> None:
 
 def _require_layout() -> InstanceLayout:
     if _layout is None:
-        raise RuntimeError("tools not bound — call python_jaeger.core.tools.bind(layout) first")
+        raise RuntimeError("tools not bound — call python_jaeger.agent.tools.bind(layout) first")
     return _layout
 
 

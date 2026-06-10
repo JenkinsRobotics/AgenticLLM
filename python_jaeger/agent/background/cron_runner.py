@@ -18,7 +18,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from . import memory as mem
+from python_jaeger.core import memory as mem
 
 
 class CronRunner(threading.Thread):

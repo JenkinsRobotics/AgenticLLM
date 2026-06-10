@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import memory as mem
+from python_jaeger.core import memory as mem
 
 
 def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict[str, Any]:

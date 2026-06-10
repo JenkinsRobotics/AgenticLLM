@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .instance import InstanceLayout
+from python_jaeger.core.instance import InstanceLayout
 
 
 # core/ lives one level deeper than the framework root, so reach up one.

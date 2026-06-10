@@ -10,7 +10,7 @@ A *skill* is a self-contained directory:
 
 The loader scans two zones:
 
-  1. Core skills        — python_jaeger/skills/   (read-only, shipped with the framework)
+  1. Core skills        — python_jaeger/agent/skills/   (read-only, shipped with the framework)
   2. Instance skills    — <instance_dir>/skills/  (agent-writable, per-instance)
 
 Resolution rules:
@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .instance import InstanceLayout
+from python_jaeger.core.instance import InstanceLayout
 
 
 # Core skills shipped with the framework. Was `base_skills/` before the

@@ -39,11 +39,11 @@ from ..main import (
     run_for_voice,
     shutdown_extensions,
 )
-from ..core import tools as agent_tools
-from ..core.cron_runner import CronRunner
+from ..agent import tools as agent_tools
+from ..agent.background.cron_runner import CronRunner
 from ..core.instance import InstanceLayout, default_instance_name, resolve_instance_dir
 from ..core.schemas import Config, load_yaml
-from ..core.prompts import build_system_prompt
+from ..agent.prompts import build_system_prompt
 
 
 def _make_handler(client: Any) -> "callable":

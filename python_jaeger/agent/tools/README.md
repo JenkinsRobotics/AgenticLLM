@@ -21,7 +21,7 @@ def my_new_tool(arg: str) -> dict[str, Any]:
 ```
 
 Re-export it from [`__init__.py`](__init__.py) so callers can do
-`from python_jaeger.core.tools import my_new_tool`, then wire it onto
+`from python_jaeger.agent.tools import my_new_tool`, then wire it onto
 the agent in `python_jaeger/main.py`:
 
 ```python

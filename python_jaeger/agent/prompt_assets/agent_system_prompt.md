@@ -72,7 +72,7 @@ The loader picks up new skills automatically on next start (or hot-reload). You 
 
 ## Overriding Core Skills
 
-The framework ships core skills in `python_jaeger/skills/` (the in-package read-only zone). You can use them, but you cannot edit them — that directory is part of the installed framework, not your writable instance.
+The framework ships core skills in `python_jaeger/agent/skills/` (the in-package read-only zone). You can use them, but you cannot edit them — that directory is part of the installed framework, not your writable instance.
 
 If a base skill doesn't behave the way you need:
 

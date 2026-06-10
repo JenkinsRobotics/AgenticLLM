@@ -70,12 +70,12 @@ def _stage_instance(root: Path) -> None:
 
 
 def _load_client_and_agent(root: Path):
-    from python_jaeger.core import tools as jaeger_tools
+    from python_jaeger.agent import tools as jaeger_tools
     from python_jaeger.core.instance import InstanceLayout
     from python_jaeger.main import (
         LlamaCppPythonClient, _get_agent, _pipeline,
     )
-    from python_jaeger.core.prompts import build_system_prompt
+    from python_jaeger.agent.prompts import build_system_prompt
     from python_jaeger.core.schemas import Config, load_yaml
 
     layout = InstanceLayout(root=root)

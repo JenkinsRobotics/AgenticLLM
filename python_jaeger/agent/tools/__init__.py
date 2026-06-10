@@ -4,7 +4,7 @@ Mirrors python_pydantic_ai/core/tools/ for cross-framework structural
 parity. Use either form:
 
     from python_jaeger.core import tools             # then tools.get_time(...)
-    from python_jaeger.core.tools import get_time    # direct import
+    from python_jaeger.agent.tools import get_time    # direct import
 
 Categories:
 

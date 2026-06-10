@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import credentials as creds
+from python_jaeger.core import credentials as creds
 from ._common import _require_layout
 
 

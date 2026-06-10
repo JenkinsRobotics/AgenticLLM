@@ -11,29 +11,30 @@ python_jaeger/
 ├── README.md            ← you are here
 ├── main.py              ← CLI entry point (`python main.py python_jaeger`)
 │
-├── core/                ← FRAMEWORK CODE — read-only at runtime
+├── agent/               ← THE CONSCIOUS NODE — everything cognitive
+│   ├── tools/             built-in agent tools (file_write/read, get_time, …)
+│   ├── skills/            core skills shipped with the framework (read-only)
+│   ├── skill_registry/    discover + register skills (core + instance)
+│   ├── prompts/           system-prompt assembler
+│   ├── prompt_assets/     raw prompt markdown (system prompt body)
+│   ├── runners/           ThinkingRunner (deep-think loop)
+│   └── background/        cron schedule firing + daily housekeeping
+│
+├── core/                ← SHARED INFRASTRUCTURE — used by everything
 │   ├── instance.py        path resolution, lockfile, manifest gate
 │   ├── schemas.py         Pydantic v2 schemas (identity, config, manifest)
 │   ├── setup_wizard.py    first-run flow (interactive)
 │   ├── credentials.py     get_credential + 0600 perm enforcement
 │   ├── memory.py          per-instance facts / episodic / schedules I/O
-│   ├── cron_runner.py     schedule firing + daily housekeeping
 │   ├── log_rotation.py    daily rotation + retention enforcement
 │   ├── migrations.py      discover + apply per-version migrations
-│   ├── skill_loader.py    discover + register skills (core + instance)
 │   ├── llm_model.py       in-process Gemma adapter for pydantic-ai
-│   ├── prompts.py         system-prompt assembler
-│   └── tools.py           built-in agent tools (file_write/read, get_time, …)
+│   └── audio/             AEC wrapper + reference buffer
 │
-├── skills/              ← CORE SKILLS shipped with the framework (read-only)
-│   └── hello_v1/          reference skill (SKILL.md + module + smoke test)
-│
-├── plugins/             ← OPT-IN EXTENSIONS (empty placeholder for M4+)
+├── plugins/             ← OPT-IN EXTENSIONS (voice loop, kokoro, whisper,
+│                          discord, telegram, imessage, mcp)
 │
 ├── migrations/     ← per-version migration scripts (paired with core/migrations.py)
-│
-├── prompts/             ← system-prompt markdown content
-│   └── agent_system_prompt.md    the v2 self-improvement contract
 │
 └── instance/            ← AGENT-WRITABLE state (created by the wizard)
     ├── .gitignore         keeps user state out of the repo
@@ -53,7 +54,7 @@ python_jaeger/
 There are TWO zones, and the framework enforces a hard line between them:
 
 **Read-only to the agent** (everything in `python_jaeger/` except `instance/<name>/skills/`):
-- All of `core/`, `skills/`, `plugins/`, `prompts/`, `migrations/`
+- All of `agent/`, `core/`, `plugins/`, `migrations/`
 - Everything in `instance/<name>/` EXCEPT the `skills/` subfolder
 - `credentials/` is doubly protected — the sandboxed `file_read` tool
   refuses to read it; the agent must use `get_credential(name)` instead
@@ -64,18 +65,18 @@ There are TWO zones, and the framework enforces a hard line between them:
 
 The `file_write` tool resolves every path relative to `<instance>/skills/`,
 rejects absolute paths and `..` escapes, and refuses any write that lands
-outside the sandbox. See `core/tools.py` for the implementation.
+outside the sandbox. See `agent/tools/` for the implementation.
 
 ## Skills: core vs instance
 
 Two distinct kinds, both follow the same `<name>_v<N>/` versioned-folder
 contract with `SKILL.md` + Python module + `tests/smoke_test.py`:
 
-- **Core skills** (`python_jaeger/skills/`) ship with the framework. Read-only.
+- **Core skills** (`python_jaeger/agent/skills/`) ship with the framework. Read-only.
 - **Instance skills** (`<instance>/skills/`) are agent-authored. Writable.
 
 On name collision, **instance wins over core** (override-via-versioning).
-Within a zone, the highest `_v<N>` suffix wins. See `core/skill_loader.py`.
+Within a zone, the highest `_v<N>` suffix wins. See `agent/skill_registry/skill_loader.py`.
 
 ## Where the instance lives
 
@@ -106,5 +107,5 @@ python main.py python_jaeger --list-credentials                    # names only
 JAEGER_INSTANCE_DIR=/tmp/test_instance python main.py python_jaeger   # custom location
 ```
 
-See `prompts/agent_system_prompt.md` for the v2 self-improvement contract
+See `agent/prompt_assets/agent_system_prompt.md` for the v2 self-improvement contract
 the agent operates under.
